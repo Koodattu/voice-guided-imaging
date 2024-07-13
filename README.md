@@ -2,8 +2,8 @@
 1. Set Up Python Environment
 First, ensure you have Python 3.8 or later installed. You can download it from the official Python website.
 ```
-python3 -m venv image_edit_env
-source image_edit_env/bin/activate
+python -m venv image_edit_venv
+./image_edit_venv/Scripts/activate
 ```
 2. Install Dependencies
 Install necessary libraries including PyTorch, Whisper, and sound handling libraries:
