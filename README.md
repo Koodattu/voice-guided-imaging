@@ -2,8 +2,8 @@
 1. Set Up Python Environment
 First, ensure you have Python 3.8 or later installed. You can download it from the official Python website.
 ```
-python3 -m venv whisper_env
-source whisper_env/bin/activate
+python3 -m venv image_edit_env
+source image_edit_env/bin/activate
 ```
 2. Install Dependencies
 Install necessary libraries including PyTorch, Whisper, and sound handling libraries:
@@ -15,7 +15,7 @@ pip install sounddevice numpy scipy pynput
 ### Running the Script
 Activate your virtual environment:
 ```
-source whisper_env/bin/activate
+source image_edit_env/bin/activate
 ```
 Run the script:
 ```
@@ -31,8 +31,8 @@ save_audio_to_wav: Saves the recorded audio to a WAV file.
 2. Transcription and Translation with Whisper:
 transcribe_and_translate: Uses Whisper to transcribe and translate the audio file.
 
-3. Processing with GPT-2:
-process_with_gpt2: Takes the transcribed text and uses GPT-2 to generate a command based on the input text.
+3. Processing with LLM:
+process_text: Takes the transcribed text and uses a LLM to generate a command based on the input text.
 
 4. Push-to-Talk Functionality:
 Uses the pynput library to detect when the 'r' key is pressed and released to start and stop recording.
