@@ -4,17 +4,36 @@ import whisper
 import torch
 from scipy.io.wavfile import write
 from pynput import keyboard
+import threading
+from queue import Queue
 
-# Initialize Whisper model
-whisper_model = whisper.load_model("base")
+# Check if a GPU is available and use it
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
+
+# Initialize Whisper model and move it to the device
+whisper_model = whisper.load_model("small").to(device)
+
+# Global variables to control recording
+recording = False
+audio_queue = Queue()
 
 # Function to record audio
-def record_audio(duration, samplerate=44100):
+def record_audio(samplerate=44100):
+    global recording, audio_data
     print("Recording...")
-    audio = sd.rec(int(duration * samplerate), samplerate=samplerate, channels=1, dtype='int16')
-    sd.wait()
+    audio = []
+
+    def callback(indata, frames, time, status):
+        if recording:
+            audio.append(indata.copy())
+
+    with sd.InputStream(callback=callback, samplerate=samplerate, channels=1, dtype='int16'):
+        while recording:
+            sd.sleep(100)
     print("Recording finished")
-    return audio
+    audio_data = np.concatenate(audio, axis=0)
+    audio_queue.put(audio_data)
 
 # Function to save audio to a WAV file
 def save_audio_to_wav(audio, filename, samplerate=44100):
@@ -22,10 +41,19 @@ def save_audio_to_wav(audio, filename, samplerate=44100):
 
 # Function to transcribe and translate audio using Whisper
 def transcribe_and_translate(model, audio_file):
-    result = model.transcribe(audio_file, task="translate")
-    return result['text']
+    print("Transcribing and translating audio...")
+    transcription = model.transcribe(audio_file)
+    language = transcription['language']
+    print(f"Detected Language: {language}")
+    print(f"Transcription: {transcription['text']}")
 
-# Function to process text with GPT-2
+    if language == "en":
+        return transcription['text']
+    
+    translation = model.transcribe(audio_file, language="en", task="translate")
+    return translation['text']
+
+# Function to process text with LLM
 def process_text(transcribed_text):
     # TODO
     command = transcribed_text
@@ -33,34 +61,36 @@ def process_text(transcribed_text):
 
 # Main function with push-to-talk functionality
 def main():
-    duration = 5  # Record for 5 seconds
-    recording = False
-    audio_data = []
+    global recording
+    print("Current recording device:", sd.query_devices(sd.default.device['input']))
 
     def on_press(key):
-        nonlocal recording, audio_data
+        global recording
         try:
-            if key.char == 'r':
-                if not recording:
-                    print("Recording started...")
-                    recording = True
-                    audio_data = record_audio(duration)
-                else:
-                    print("Recording already in progress...")
+            if key.char == 'r' and not recording:
+                print("Recording started...")
+                recording = True
+                threading.Thread(target=record_audio).start()
         except AttributeError:
             pass
 
     def on_release(key):
-        nonlocal recording
-        if key.char == 'r' and recording:
-            print("Recording stopped.")
-            recording = False
-            audio_file = 'recorded_audio.wav'
-            save_audio_to_wav(audio_data, audio_file)
-            text = transcribe_and_translate(whisper_model, audio_file)
-            print("Transcribed and translated text:", text)
-            command = process_with_gpt2(text)
-            print("Generated command:", command)
+        global recording, audio_data
+        try:
+            if key.char == 'r' and recording:
+                print("Recording stopped.")
+                recording = False
+                # Ensure the recording thread has finished
+                threading.Thread(target=process_recording).start()
+        except AttributeError:
+            pass
+
+    def process_recording():
+        audio_data = audio_queue.get()
+        audio_file = 'recorded_audio.wav'
+        save_audio_to_wav(audio_data, audio_file)
+        text = transcribe_and_translate(whisper_model, audio_file)
+        print("Transcribed and translated text:", text)
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
