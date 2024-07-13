@@ -10,7 +10,7 @@ Install necessary libraries including PyTorch, Whisper, and sound handling libra
 ```
 pip install torch torchvision torchaudio
 pip install git+https://github.com/openai/whisper.git
-pip install sounddevice numpy scipy pynput transformers
+pip install sounddevice numpy scipy pynput
 ```
 ### Running the Script
 Activate your virtual environment:
