@@ -9,6 +9,9 @@ from queue import Queue
 import time
 import tkinter as tk
 from PIL import Image, ImageTk
+from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 
 class WhisperApp:
     def __init__(self, root):
@@ -17,8 +20,9 @@ class WhisperApp:
         self.root.geometry("800x600")
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {self.device}")
+        print(f"Using device (cuda/cpu): {self.device}")
 
+        print("Loading Whisper model...")
         self.whisper_model = whisper.load_model("medium").to(self.device)
 
         self.recording = False
@@ -26,8 +30,13 @@ class WhisperApp:
         self.buffer = []
         self.stop_event = threading.Event()
 
+        print("Setting up keyboard listener...")
+        self.setup_image_generator()
+        print("Setting up UI...")
         self.setup_ui()
         self.setup_keyboard_listener()
+        print("Setting up image generator...")
+        print("Application setup complete!")
 
     def setup_ui(self):
         self.status_label = tk.Label(self.root, text="Press 'R' to start/stop recording", font=("Helvetica", 16))
@@ -39,9 +48,26 @@ class WhisperApp:
         self.command_label = tk.Label(self.root, text="Command: ", font=("Helvetica", 16))
         self.command_label.pack(pady=20)
 
+        self.image_label = tk.Label(self.root)
+        self.image_label.pack(pady=20)
+
     def setup_keyboard_listener(self):
         listener = keyboard.Listener(on_press=self.on_press, on_release=self.on_release)
         listener.start()
+
+    def setup_image_generator(self):
+        base = "stabilityai/stable-diffusion-xl-base-1.0"
+        repo = "ByteDance/SDXL-Lightning"
+        ckpt = "sdxl_lightning_2step_unet.safetensors"  # Use the correct ckpt for your step setting!
+
+        # Load model configuration
+        config = UNet2DConditionModel.load_config(base, subfolder="unet")
+        self.unet = UNet2DConditionModel.from_config(config).to(self.device, torch.float16)
+        self.unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device=self.device))
+        self.pipe = StableDiffusionXLPipeline.from_pretrained(base, unet=self.unet, torch_dtype=torch.float16, variant="fp16").to(self.device)
+
+        # Ensure sampler uses "trailing" timesteps.
+        self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config, timestep_spacing="trailing")
 
     def on_press(self, key):
         try:
@@ -70,6 +96,7 @@ class WhisperApp:
                     processed_command = self.process_text(transcribed_text)
                     print(f"Processed Command: {processed_command}")
                     self.command_label.config(text=f"Command: {processed_command}")
+                    self.generate_image(processed_command)
         except AttributeError:
             pass
 
@@ -141,6 +168,23 @@ class WhisperApp:
 
     def update_status(self, text):
         self.status_label.config(text=text)
+
+    def generate_image(self, prompt):
+        print(f"Generating image for prompt: {prompt}")
+        image = self.pipe(prompt, num_inference_steps=4, guidance_scale=0).images[0]
+        image.save("generated_image.png")
+        print("Image saved successfully")
+        self.display_image("generated_image.png")
+
+    def display_image(self, image_path):
+        try:
+            img = Image.open(image_path)
+            img = ImageTk.PhotoImage(img)
+            self.image_label.config(image=img)
+            self.image_label.image = img
+            print("Image displayed successfully")
+        except Exception as e:
+            print(f"Error displaying image: {e}")
 
 if __name__ == "__main__":
     print("Starting application!")
