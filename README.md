@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ```
 3. Run the script:
 ```
-python script_name.py
+python main.py
 ```
 4. Hold the key ```R``` on the keyboard to start recording audio and release it to stop and process the given command.
 
