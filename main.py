@@ -30,12 +30,12 @@ class WhisperApp:
         self.buffer = []
         self.stop_event = threading.Event()
 
-        print("Setting up keyboard listener...")
+        print("Setting up image generator...")
         self.setup_image_generator()
         print("Setting up UI...")
         self.setup_ui()
+        print("Setting up keyboard listener...")
         self.setup_keyboard_listener()
-        print("Setting up image generator...")
         print("Application setup complete!")
 
     def setup_ui(self):
@@ -106,6 +106,7 @@ class WhisperApp:
         language = transcription['language']
         print(f"Detected Language: {language}")
         print(f"Transcription: {transcription['text']}")
+        self.update_live_transcription(transcription['text'])
 
         if language == "en":
             return transcription['text']
