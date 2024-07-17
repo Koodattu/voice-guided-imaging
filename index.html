@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tietoprovinssi Voice-Image-Edit</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- frontend backend communication -->
+    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    <!-- ort is required by vad -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+    <!-- vad for audio recording -->
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad/dist/index.browser.js"></script>
+    <style>
+      body {
+        font-family: sans-serif;
+        font-family: "Exo", sans-serif;
+        background: #070815;
+        color: white;
+      }
+      h1 {
+        text-align: center;
+        font-weight: lighter;
+      }
+      h2 {
+        text-align: center;
+        font-weight: lighter;
+      }
+      h3 {
+        text-align: center;
+        font-weight: lighter;
+      }
+      .p-text {
+        font-size: 1.2rem;
+        color: white;
+        font-family: "Exo", sans-serif;
+      }
+      .flex-center {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .flex-horizontal {
+        display: flex;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Tietoprovinssi Demo - Voice Guided AI Image Editing</h1>
+    <h2>GPT Lab Seinäjoki</h2>
+    <div class="flex-center">
+      <p>Status:&nbsp;</p>
+      <p id="general_status">Waiting...</p>
+    </div>
+    <div class="flex-center">
+      <label> <input type="checkbox" id="toggleRecording" /> Toggle recording:&nbsp;</label>
+      <p style="color: lightcoral" id="recording_status">Disabled</p>
+    </div>
+    <div>
+      <div class="flex-horizontal">
+        <p class="p-text">Transcription:&nbsp;</p>
+        <p class="p-text" id="transcription"></p>
+      </div>
+      <div class="flex-horizontal">
+        <p class="p-text">Translation:&nbsp;</p>
+        <p class="p-text" id="translation"></p>
+      </div>
+    </div>
+    <div class="flex-center">
+      <img id="generated_image" style="display: none; max-width: 100%" />
+    </div>
+
+    <script>
+      const transcription = document.getElementById("transcription");
+      const translation = document.getElementById("translation");
+      const general_status = document.getElementById("general_status");
+      const recording_status = document.getElementById("recording_status");
+      const toggleRecording = document.getElementById("toggleRecording");
+      const generated_image = document.getElementById("generated_image");
+
+      let recordingEnabled = false;
+      let backendProcessing = false;
+      let shouldClearTranscription = false;
+      let speechTimer;
+      let lastSpeechEndTime = 0;
+      let status = "Unknown";
+
+      toggleRecording.addEventListener("change", () => {
+        recordingEnabled = toggleRecording.checked;
+        updateRecordingStatusStyle();
+      });
+
+      async function main() {
+        let status = "Unknown";
+        updateRecordingStatusStyle();
+        const socket = io();
+
+        socket.on("connect", async () => {
+          const myvad = await vad.MicVAD.new({
+            positiveSpeechThreshold: 0.8,
+            negativeSpeechThreshold: 0.8 - 0.15,
+            minSpeechFrames: 1,
+            preSpeechPadFrames: 1,
+            redemptionFrames: 2,
+            onSpeechStart: () => {
+              if (!(recordingEnabled && !backendProcessing)) {
+                return;
+              }
+              if (shouldClearTranscription) {
+                transcription.innerText = "";
+                shouldClearTranscription = false;
+              }
+              console.log("Speech start detected");
+              general_status.innerText = "Listening...";
+              clearTimeout(speechTimer);
+            },
+            onSpeechEnd: (audio) => {
+              if (!(recordingEnabled && !backendProcessing)) {
+                return;
+              }
+              const wavBuffer = vad.utils.encodeWAV(audio);
+              const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
+              general_status.innerText = "Processing...";
+              socket.emit("audio_data", base64);
+              lastSpeechEndTime = Date.now();
+              speechTimer = setTimeout(() => {
+                if (Date.now() - lastSpeechEndTime >= 3000) {
+                  general_status.innerText = "Translating...";
+                  socket.emit("translate");
+                  backendProcessing = true;
+                  updateRecordingStatusStyle();
+                }
+              }, 3000);
+            },
+          });
+          myvad.start();
+        });
+
+        socket.on("transcription", (data) => {
+          general_status.innerText = "Transcription received";
+          transcription.innerText = (transcription.innerText + data).replace(".", " ").replace("  ", " ");
+        });
+
+        socket.on("translation", async (data) => {
+          general_status.innerText = "Translation received";
+          translation.innerText = data;
+          await generateImage(data);
+        });
+      }
+      main();
+
+      async function generateImage(prompt) {
+        backendProcessing = true;
+        updateRecordingStatusStyle();
+        general_status.innerText = "Generating image...";
+        const response = await fetch("/generate_image", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt }),
+        });
+        const result = await response.json();
+        const imageSrc = "data:image/png;base64," + result.image;
+        generated_image.src = imageSrc;
+        generated_image.style.display = "block";
+        backendProcessing = false;
+        shouldClearTranscription = true;
+        updateRecordingStatusStyle();
+        general_status.innerText = "Image generated";
+      }
+
+      function updateRecordingStatusStyle(status) {
+        recording_status.style = "";
+        if (backendProcessing) {
+          status = "Processing";
+        } else if (recordingEnabled) {
+          status = "Enabled";
+        } else {
+          status = "Disabled";
+        }
+        recording_status.innerText = status;
+        if (status === "Enabled") {
+          recording_status.style.color = "lightgreen";
+        } else if (status === "Disabled") {
+          recording_status.style.color = "lightcoral";
+        } else {
+          recording_status.style.color = "yellow";
+        }
+      }
+    </script>
+  </body>
+</html>
