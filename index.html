@@ -56,6 +56,14 @@
       <p id="general_status">Waiting...</p>
     </div>
     <div class="flex-center">
+      <input type="radio" id="rb_auto" name="rb_lang" checked="true" />
+      <label for="rb_auto">Auto</label>
+      <input type="radio" id="rb_en" name="rb_lang" />
+      <label for="rb_en">English</label>
+      <input type="radio" id="rb_fi" name="rb_lang" />
+      <label for="rb_fi">Finnish</label>
+    </div>
+    <div class="flex-center">
       <label> <input type="checkbox" id="toggleRecording" /> Toggle recording:&nbsp;</label>
       <p style="color: lightcoral" id="recording_status">Disabled</p>
     </div>
@@ -80,6 +88,10 @@
       const recording_status = document.getElementById("recording_status");
       const toggleRecording = document.getElementById("toggleRecording");
       const generated_image = document.getElementById("generated_image");
+
+      const rb_auto = document.getElementById("rb_auto");
+      const rb_en = document.getElementById("rb_en");
+      const rb_fi = document.getElementById("rb_fi");
 
       let recordingEnabled = false;
       let backendProcessing = false;
@@ -106,7 +118,7 @@
             preSpeechPadFrames: 1,
             redemptionFrames: 2,
             onSpeechStart: () => {
-              if (!(recordingEnabled && !backendProcessing)) {
+              if (!recordingEnabled || backendProcessing) {
                 return;
               }
               if (shouldClearTranscription) {
@@ -118,7 +130,7 @@
               clearTimeout(speechTimer);
             },
             onSpeechEnd: (audio) => {
-              if (!(recordingEnabled && !backendProcessing)) {
+              if (!recordingEnabled || backendProcessing) {
                 return;
               }
               const wavBuffer = vad.utils.encodeWAV(audio);
@@ -137,6 +149,18 @@
             },
           });
           myvad.start();
+
+          rb_auto.addEventListener("change", () => {
+            socket.emit("lang_select", "");
+          });
+
+          rb_en.addEventListener("change", () => {
+            socket.emit("lang_select", "en");
+          });
+
+          rb_fi.addEventListener("change", () => {
+            socket.emit("lang_select", "fi");
+          });
         });
 
         socket.on("transcription", (data) => {
@@ -147,30 +171,39 @@
         socket.on("translation", async (data) => {
           general_status.innerText = "Translation received";
           translation.innerText = data;
-          await generateImage(data);
+          await processCommand(data);
+        });
+
+        socket.on("status", async (data) => {
+          general_status.innerText = data;
         });
       }
       main();
 
-      async function generateImage(prompt) {
+      async function processCommand(command) {
         backendProcessing = true;
         updateRecordingStatusStyle();
-        general_status.innerText = "Generating image...";
-        const response = await fetch("/generate_image", {
+        general_status.innerText = "Processing command...";
+        const response = await fetch("/process_command", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ command }),
         });
         const result = await response.json();
-        const imageSrc = "data:image/png;base64," + result.image;
-        generated_image.src = imageSrc;
-        generated_image.style.display = "block";
+        console.log(result);
+        if (result.error) {
+          general_status.innerText = "Error: " + result.error;
+        } else {
+          const imageSrc = "data:image/png;base64," + result.image;
+          generated_image.src = imageSrc;
+          generated_image.style.display = "block";
+        }
         backendProcessing = false;
         shouldClearTranscription = true;
         updateRecordingStatusStyle();
-        general_status.innerText = "Image generated";
+        general_status.innerText = "Done! Waiting for input...";
       }
 
       function updateRecordingStatusStyle(status) {
