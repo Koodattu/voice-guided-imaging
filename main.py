@@ -5,15 +5,14 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
-from diffusers import StableDiffusionPipeline, EulerAncestralDiscreteScheduler, StableDiffusionInstructPix2PixPipeline
+from diffusers import EulerAncestralDiscreteScheduler, StableDiffusionInstructPix2PixPipeline, StableVideoDiffusionPipeline, StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler,StableDiffusionXLInstructPix2PixPipeline
+from diffusers.utils import export_to_video
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 from PIL import Image
 from pathlib import Path
 from langchain_community.chat_models import ChatOllama
 import json
-from imaginairy.api.generate import imagine
-from imaginairy.schema import ImaginePrompt, ControlInput, LazyLoadingImage, config
-from imaginairy.api.video_sample import generate_video
-from imaginairy import config
 
 app = Flask(__name__, template_folder=".")
 socketio = SocketIO(app)
@@ -26,46 +25,54 @@ llm = ChatOllama(model="mistral:instruct")
 print(llm.invoke("Respond with: Mistral-instruct ready to server!").content)
 
 print("Loading WHISPER model...")
-whisper_model = whisper.load_model("small").to(device)
+whisper_model = whisper.load_model("medium").to(device)
 print("WHISPER model loaded successfully!")
-
-# Load the image generation model
-MODEL_WEIGHT_CONFIGS = [
-    config.ModelWeightsConfig(
-        name="sdxl_lightning_4step_unet",
-        aliases=["sdxl_lightning_4step_unet"],
-        architecture=config.MODEL_ARCHITECTURE_LOOKUP["sdxl"],
-        defaults={
-            "negative_prompt": config.DEFAULT_NEGATIVE_PROMPT,
-            "composition_strength": 0.6,
-        },
-        weights_location="https://huggingface.co/ByteDance/SDXL-Lightning/resolve/c9a24f48e1c025556787b0c58dd67a091ece2e44/sdxl_lightning_4step.safetensors?download=true",
-        #weights_location="https://huggingface.co/ByteDance/SDXL-Lightning/resolve/c9a24f48e1c025556787b0c58dd67a091ece2e44/sdxl_lightning_2step_unet.safetensors?download=true",
-        #weights_location="https://huggingface.co/ByteDance/SDXL-Lightning/tree/c9a24f48e1c025556787b0c58dd67a091ece2e44"
-    ),
-    config.ModelWeightsConfig(
-        name="sdxl-instructpix2pix-768",
-        aliases=["sdxl-instructpix2pix-768"],
-        architecture=config.MODEL_ARCHITECTURE_LOOKUP["sdxl"],
-        defaults={
-            "negative_prompt": config.DEFAULT_NEGATIVE_PROMPT,
-            "composition_strength": 0.6,
-        },
-        weights_location="https://huggingface.co/diffusers/sdxl-instructpix2pix-768/tree/06653d47f8d22f2c2205a5884d6a24c5e76d2ca7"
-    ),
-]
-
-# Adding the custom model to the lookup
-for mw in MODEL_WEIGHT_CONFIGS:
-    for a in mw.aliases:
-        config.MODEL_WEIGHT_CONFIG_LOOKUP[a] = mw
-
-sdxl_txt2img = config.MODEL_WEIGHT_CONFIG_LOOKUP["sdxl_lightning_4step_unet"]
-sdxl_pix2pix = config.MODEL_WEIGHT_CONFIG_LOOKUP["sdxl-instructpix2pix-768"]
 
 # Holder for whole recording
 audio_segments = []
 transcription_language = ""
+cache_dir = "./model_cache"
+
+# https://huggingface.co/ByteDance/SDXL-Lightning
+def load_sdxl_lightning():
+    base = "stabilityai/stable-diffusion-xl-base-1.0"
+    repo = "ByteDance/SDXL-Lightning"
+    ckpt = "sdxl_lightning_2step_unet.safetensors"
+    unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
+    unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
+    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
+    txt2img = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
+    txt2img.to("cuda")
+    txt2img.scheduler = EulerDiscreteScheduler.from_config(txt2img.scheduler.config, timestep_spacing="trailing")
+    txt2img.enable_model_cpu_offload()
+    return txt2img
+
+# https://huggingface.co/timbrooks/instruct-pix2pix
+def load_instruct_pix2pix():
+    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained("timbrooks/instruct-pix2pix", torch_dtype=torch.float16, cache_dir=cache_dir)
+    pix2pix.to("cuda")
+    pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
+    pix2pix.enable_model_cpu_offload()
+    return pix2pix
+
+# https://huggingface.co/diffusers/sdxl-instructpix2pix-768
+def load_sdxl_instruct_pix2pix():
+    pix2pix_sdxl = StableDiffusionXLInstructPix2PixPipeline.from_pretrained("diffusers/sdxl-instructpix2pix-768", torch_dtype=torch.float16, cache_dir=cache_dir)
+    pix2pix_sdxl.to("cuda")
+    pix2pix_sdxl.enable_model_cpu_offload()
+    return pix2pix_sdxl
+
+# https://huggingface.co/docs/diffusers/using-diffusers/svd
+def load_video_diffusion():
+    img2vid = StableVideoDiffusionPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt", torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
+    img2vid.to("cuda")
+    img2vid.enable_model_cpu_offload()
+    img2vid.unet.enable_forward_chunking()
+    return img2vid
+
+def unload_model(model):
+    del model
+    torch.cuda.empty_cache()
 
 def save_concatenated_audio():
     concatenated = AudioSegment.empty()
@@ -133,28 +140,36 @@ def handle_llm_response(response):
 
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
-    prompt = ImaginePrompt(prompt=prompt, model_weights="sd15", steps=10, size="1024x1024")
-    result = next(imagine(prompts=prompt))
+    txt2img = load_sdxl_lightning()
+    image = txt2img(prompt, num_inference_steps=4, guidance_scale=0).images[0]
+    unload_model(txt2img)
     print("Image generated!")
-    result.img.save("generated_image.png")
+    image.save("generated_image.webp")
     buffered = io.BytesIO()
-    result.img.save(buffered, format="PNG")
+    image.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return jsonify({"image": img_str})
 
 def edit_image(prompt):
     print(f"Editing image with prompt: {prompt}")
     image = Image.open("generated_image.png")
-    image = image.resize((768, 768))
-    image = LazyLoadingImage(img = image)
-    control_mode = ControlInput(mode="edit", image=image)
-    prompt = ImaginePrompt(size="1024x1024", prompt=prompt, control_inputs=[control_mode], init_image_strength=0.01, steps=10, model_weights="sd15")
-    imagine_iterator = imagine(prompts=prompt)
-    result = next(imagine_iterator)
+    resolution = 512
+    resolution_hd = 1024
+    image = image.resize((resolution, resolution))
+    pix2pix = load_instruct_pix2pix()
+    image = pix2pix(
+        prompt=prompt,
+        image=image,
+        guidance_scale=3,
+        image_guidance_scale=1,
+        num_inference_steps=10,
+    ).images[0]
+    unload_model(pix2pix)
     print("Edited image!")
-    result.img.save("edited_image.png")
+    image = image.resize((resolution_hd, resolution_hd))
+    image.save("edited_image.png")
     buffered = io.BytesIO()
-    result.img.save(buffered, format="PNG")
+    image.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return jsonify({"image": img_str})
 
@@ -167,8 +182,16 @@ def previous_image():
     return jsonify({"image": img_str})
 
 def generate_video_from_image():
-    video = generate_video(input_path="generated_image.png", output_folder="./")
-    return jsonify({"video": video})
+    print("Generating video from image...")
+    image = Image.open("generated_image.png")
+    image = image.resize((1024, 576))
+    generator = torch.manual_seed(42)
+    img2vid = load_video_diffusion()
+    frames = img2vid(image, decode_chunk_size=4, generator=generator, num_frames=7).frames[0]
+    print("Video generated!")
+    unload_model(img2vid)
+    export_to_video(frames, "generated.mp4", fps=7)
+    return jsonify({"video": "generated.mp4"})
 
 @app.route("/")
 def index():

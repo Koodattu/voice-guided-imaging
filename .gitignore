@@ -163,3 +163,5 @@ cython_debug/
 /image_edit
 *.wav
 *.png
+*.mp4
+/model_cache

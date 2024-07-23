@@ -98,69 +98,67 @@
       let shouldClearTranscription = false;
       let speechTimer;
       let lastSpeechEndTime = 0;
-      let status = "Unknown";
+      let myvad = null;
+      let socket = null;
 
       toggleRecording.addEventListener("change", () => {
         recordingEnabled = toggleRecording.checked;
         updateRecordingStatusStyle();
       });
 
-      async function main() {
-        let status = "Unknown";
-        updateRecordingStatusStyle();
-        const socket = io();
-
-        socket.on("connect", async () => {
-          const myvad = await vad.MicVAD.new({
-            positiveSpeechThreshold: 0.8,
-            negativeSpeechThreshold: 0.8 - 0.15,
-            minSpeechFrames: 1,
-            preSpeechPadFrames: 1,
-            redemptionFrames: 2,
-            onSpeechStart: () => {
-              if (!recordingEnabled || backendProcessing) {
-                return;
-              }
-              if (shouldClearTranscription) {
-                transcription.innerText = "";
-                shouldClearTranscription = false;
-              }
-              console.log("Speech start detected");
-              general_status.innerText = "Listening...";
-              clearTimeout(speechTimer);
-            },
-            onSpeechEnd: (audio) => {
-              if (!recordingEnabled || backendProcessing) {
-                return;
-              }
-              const wavBuffer = vad.utils.encodeWAV(audio);
-              const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
-              general_status.innerText = "Processing...";
+      async function startMicVAD(stream) {
+        myvad = await vad.MicVAD.new({
+          stream,
+          positiveSpeechThreshold: 0.8,
+          negativeSpeechThreshold: 0.8 - 0.15,
+          minSpeechFrames: 1,
+          preSpeechPadFrames: 1,
+          redemptionFrames: 2,
+          onSpeechStart: () => {
+            if (!recordingEnabled || backendProcessing) {
+              return;
+            }
+            if (shouldClearTranscription) {
+              transcription.innerText = "";
+              shouldClearTranscription = false;
+            }
+            console.log("Speech start");
+            general_status.innerText = "Listening...";
+            clearTimeout(speechTimer);
+          },
+          onSpeechEnd: (audio) => {
+            if (!recordingEnabled || backendProcessing) {
+              return;
+            }
+            console.log("Speech end");
+            const wavBuffer = vad.utils.encodeWAV(audio);
+            const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
+            general_status.innerText = "Processing...";
+            if (socket && socket.connected) {
               socket.emit("audio_data", base64);
-              lastSpeechEndTime = Date.now();
-              speechTimer = setTimeout(() => {
-                if (Date.now() - lastSpeechEndTime >= 3000) {
-                  general_status.innerText = "Translating...";
+            }
+            lastSpeechEndTime = Date.now();
+            speechTimer = setTimeout(() => {
+              if (Date.now() - lastSpeechEndTime >= 3000) {
+                general_status.innerText = "Translating...";
+                if (socket && socket.connected) {
                   socket.emit("translate");
-                  backendProcessing = true;
-                  updateRecordingStatusStyle();
                 }
-              }, 3000);
-            },
-          });
-          myvad.start();
+                backendProcessing = true;
+                updateRecordingStatusStyle();
+              }
+            }, 3000);
+          },
+        });
+        myvad.start();
+      }
 
-          rb_auto.addEventListener("change", () => {
-            socket.emit("lang_select", "");
-          });
+      async function main() {
+        updateRecordingStatusStyle();
+        socket = io("http://localhost:5001");
 
-          rb_en.addEventListener("change", () => {
-            socket.emit("lang_select", "en");
-          });
-
-          rb_fi.addEventListener("change", () => {
-            socket.emit("lang_select", "fi");
-          });
+        socket.on("connect", () => {
+          console.log("Connected to server");
         });
 
         socket.on("transcription", (data) => {
@@ -176,6 +174,39 @@
 
         socket.on("status", async (data) => {
           general_status.innerText = data;
+        });
+
+        socket.on("disconnect", () => {
+          console.log("Disconnected from server");
+        });
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            autoGainControl: true,
+            noiseSuppression: true,
+            sampleRate: 44100, // Improved audio quality
+          },
+        });
+        await startMicVAD(stream);
+
+        rb_auto.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("lang_select", "");
+          }
+        });
+
+        rb_en.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("lang_select", "en");
+          }
+        });
+
+        rb_fi.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("lang_select", "fi");
+          }
         });
       }
       main();
@@ -206,7 +237,8 @@
         general_status.innerText = "Done! Waiting for input...";
       }
 
-      function updateRecordingStatusStyle(status) {
+      function updateRecordingStatusStyle() {
+        let status = "Unknown";
         recording_status.style = "";
         if (backendProcessing) {
           status = "Processing";
