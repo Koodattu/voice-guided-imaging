@@ -172,7 +172,7 @@
           await processCommand(data);
         });
 
-        socket.on("status", async (data) => {
+        socket.on("status", (data) => {
           console.log("Status: " + data);
           general_status.innerText = data;
         });

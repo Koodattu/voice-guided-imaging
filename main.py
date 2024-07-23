@@ -16,7 +16,7 @@ import json
 from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
 
 app = Flask(__name__, template_folder=".")
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode="threading")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device (cuda/cpu): {device}")
@@ -31,7 +31,7 @@ print("WHISPER model loaded successfully!")
 
 # Holder for whole recording
 audio_segments = []
-transcription_language = ""
+transcription_language = None
 cache_dir = "./model_cache"
 
 # https://huggingface.co/ByteDance/SDXL-Lightning
@@ -81,6 +81,10 @@ def save_concatenated_audio():
         concatenated += segment
     concatenated.export("concatenated_audio.wav", format="wav")
     audio_segments.clear()
+
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
 
 @socketio.on("lang_select")
 def handle_lang_select(data):
@@ -141,6 +145,7 @@ def handle_llm_response(response):
 
 def progress(pipe, step: int, timestep: int, callback_kwargs):
     print(f"Progress: Step {step}, Timestep {timestep}")
+    socketio.emit("status", f"Generating, Step {step+1}")
     #latents = callback_kwargs["latents"]
     #image = latents_to_rgb(latents)
     #image.save(f"{step}.png")
