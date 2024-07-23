@@ -24,6 +24,9 @@ Response: { "edit": "make it rain" }
 User Input: "time of day night"
 Response: { "edit": "make night time" }
 
+User Input: "add fireworks to the sky"
+Response: { "edit": "add fireworks to the sky" }
+
 User Input: "change the image so that the man is a woman"
 Response: { "edit": "change the man into a woman" }
 

@@ -1,7 +1,7 @@
 import base64
 import io
 import whisper
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
@@ -13,6 +13,7 @@ from PIL import Image
 from pathlib import Path
 from langchain_community.chat_models import ChatOllama
 import json
+from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
 
 app = Flask(__name__, template_folder=".")
 socketio = SocketIO(app)
@@ -123,36 +124,59 @@ def handle_llm_response(response):
     response = json.loads(response)
     if "create" in response:
         prompt = response["create"]
-        #socketio.emit("status", "Creating new image...")
+        socketio.emit("status", "Creating new image...")
         return generate_image(prompt)
     if "edit" in response:
         prompt = response["edit"]
-        #socketio.emit("status", "Editing image...")
+        socketio.emit("status", "Editing image...")
         return edit_image(prompt)
     if "video" in response:
-        #socketio.emit("status", "Generating video from image...")
+        socketio.emit("status", "Generating video from image...")
         return generate_video_from_image()
     if "undo" in response:
-        #socketio.emit("status", "Reverting to previous image...")
+        socketio.emit("status", "Reverting to previous image...")
         return previous_image()
     if "error" in response:
         return jsonify({"error": response["error"]})
 
+def progress(pipe, step: int, timestep: int, callback_kwargs):
+    print(f"Progress: Step {step}, Timestep {timestep}")
+    #latents = callback_kwargs["latents"]
+    #image = latents_to_rgb(latents)
+    #image.save(f"{step}.png")
+    return callback_kwargs
+
+def latents_to_rgb(latents):
+    weights = (
+        (60, -60, 25, -70),
+        (60,  -5, 15, -50),
+        (60,  10, -5, -35)
+    )
+    weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
+    biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
+    rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
+    image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
+    image_array = image_array.transpose(1, 2, 0)
+    return Image.fromarray(image_array)
+
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
     txt2img = load_sdxl_lightning()
-    image = txt2img(prompt, num_inference_steps=4, guidance_scale=0).images[0]
+    image = txt2img(
+        prompt, 
+        num_inference_steps=4, 
+        guidance_scale=0,
+        callback_on_step_end=progress,
+        callback_on_step_end_tensor_inputs=["latents"]
+    ).images[0]
     unload_model(txt2img)
     print("Image generated!")
     image.save("generated_image.webp")
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return jsonify({"image": img_str})
+    return send_file("generated_image.webp", mimetype="image/webp")
 
 def edit_image(prompt):
     print(f"Editing image with prompt: {prompt}")
-    image = Image.open("generated_image.png")
+    image = Image.open("generated_image.webp")
     resolution = 512
     resolution_hd = 1024
     image = image.resize((resolution, resolution))
@@ -163,35 +187,57 @@ def edit_image(prompt):
         guidance_scale=3,
         image_guidance_scale=1,
         num_inference_steps=10,
+        callback_on_step_end=progress
     ).images[0]
     unload_model(pix2pix)
     print("Edited image!")
     image = image.resize((resolution_hd, resolution_hd))
-    image.save("edited_image.png")
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return jsonify({"image": img_str})
+    image.save("edited_image.webp")
+    return send_file("edited_image.webp", mimetype="image/webp")
 
 def previous_image():
     print("Going to previous image")
-    init_image = Image.open("generated_image.png")
-    buffered = io.BytesIO()
-    init_image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return jsonify({"image": img_str})
+    return send_file("generated_image.webp", mimetype="image/webp")
+
+def mp4_to_webp(mp4_path, webp_path, fps):
+    clip = VideoFileClip(mp4_path)
+    forward_clip = clip
+    backward_clip = clip.fx(vfx.time_mirror)
+    looping_clip = concatenate_videoclips([forward_clip, backward_clip])
+
+    # Save frames as individual WebP images
+    frames = []
+    for frame in looping_clip.iter_frames(fps=fps):
+        img = Image.fromarray(frame)
+        img = img.resize((1024, 1024))
+        frames.append(img)
+
+    # Save frames as a looping WebP animation
+    frames[0].save(
+        webp_path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=int(1000 / fps),
+        loop=0
+    )
 
 def generate_video_from_image():
     print("Generating video from image...")
-    image = Image.open("generated_image.png")
+    image = Image.open("generated_image.webp")
     image = image.resize((1024, 576))
-    generator = torch.manual_seed(42)
     img2vid = load_video_diffusion()
-    frames = img2vid(image, decode_chunk_size=4, generator=generator, num_frames=7).frames[0]
+    frames = img2vid(
+        image, 
+        decode_chunk_size=2, 
+        num_frames=7,
+        num_inference_steps=10,
+        callback_on_step_end=progress
+    ).frames[0]
     print("Video generated!")
     unload_model(img2vid)
-    export_to_video(frames, "generated.mp4", fps=7)
-    return jsonify({"video": "generated.mp4"})
+    export_to_video(frames, "generated_video.mp4", fps=7)
+    mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
+    return send_file("generated_video.webp", mimetype="image/webp")
 
 @app.route("/")
 def index():

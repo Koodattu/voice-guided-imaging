@@ -173,6 +173,7 @@
         });
 
         socket.on("status", async (data) => {
+          console.log("Status: " + data);
           general_status.innerText = data;
         });
 
@@ -182,12 +183,11 @@
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            channelCount: 1,
-            echoCancellation: true,
-            autoGainControl: true,
-            noiseSuppression: true,
-            sampleRate: 44100, // Improved audio quality
+            echoCancellation: false,
+            autoGainControl: false,
+            noiseCancellation: false,
           },
+          video: false,
         });
         await startMicVAD(stream);
 
@@ -222,15 +222,16 @@
           },
           body: JSON.stringify({ command }),
         });
-        const result = await response.json();
-        console.log(result);
-        if (result.error) {
-          general_status.innerText = "Error: " + result.error;
-        } else {
-          const imageSrc = "data:image/png;base64," + result.image;
-          generated_image.src = imageSrc;
-          generated_image.style.display = "block";
+        if (response.headers.get("content-type") === "application/json") {
+          general_status.innerText = "Error: " + (await response.json()).error;
+          backendProcessing = false;
+          updateRecordingStatusStyle();
+          return;
         }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        generated_image.src = url;
+        generated_image.style.display = "block";
         backendProcessing = false;
         shouldClearTranscription = true;
         updateRecordingStatusStyle();
