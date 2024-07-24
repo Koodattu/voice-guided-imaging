@@ -14,10 +14,14 @@ from pathlib import Path
 from langchain_community.chat_models import ChatOllama
 import json
 from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
+from flask_cors import CORS
+import pandas as pd
 
 app = Flask(__name__, template_folder=".")
+CORS(app)
 socketio = SocketIO(app, async_mode="threading")
 
+cache_dir = "./model_cache"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device (cuda/cpu): {device}")
 
@@ -29,10 +33,22 @@ print("Loading WHISPER model...")
 whisper_model = whisper.load_model("medium").to(device)
 print("WHISPER model loaded successfully!")
 
+print("Loading SDXL-Lightning model...")
+base = "stabilityai/stable-diffusion-xl-base-1.0"
+repo = "ByteDance/SDXL-Lightning"
+ckpt = "sdxl_lightning_4step_unet.safetensors"
+unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
+unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
+unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
+txt2img = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
+txt2img.to("cuda")
+txt2img.scheduler = EulerDiscreteScheduler.from_config(txt2img.scheduler.config, timestep_spacing="trailing")
+txt2img.enable_model_cpu_offload()
+print("SDXL-Lightning model loaded successfully!")
+
 # Holder for whole recording
 audio_segments = []
 transcription_language = None
-cache_dir = "./model_cache"
 
 # https://huggingface.co/ByteDance/SDXL-Lightning
 def load_sdxl_lightning():
@@ -65,7 +81,7 @@ def load_sdxl_instruct_pix2pix():
 
 # https://huggingface.co/docs/diffusers/using-diffusers/svd
 def load_video_diffusion():
-    img2vid = StableVideoDiffusionPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt", torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
+    img2vid = StableVideoDiffusionPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt-1-1", torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
     img2vid.to("cuda")
     img2vid.enable_model_cpu_offload()
     img2vid.unet.enable_forward_chunking()
@@ -120,61 +136,61 @@ def process_command():
     data = request.json
     command = data.get("command")
     print(f"Processing command: {command}")
-    result = llm.invoke(Path('llm_instructions.txt').read_text().replace("<user_input>", command))
+    result = llm_process_command(command)
     return handle_llm_response(result.content)
 
 def handle_llm_response(response):
     print(f"LLM response: {response}")
     response = json.loads(response)
-    if "create" in response:
-        prompt = response["create"]
+    action = response["action"]
+    prompt = response["prompt"]
+    socketio.emit("llm_response", prompt)
+    if action == "create":
+        #prompt = llm_sd_prompt_craf(prompt).content
+        print(f"LLM prompt: {prompt}")
+        socketio.emit("llm_response", prompt)
         socketio.emit("status", "Creating new image...")
         return generate_image(prompt)
-    if "edit" in response:
-        prompt = response["edit"]
+    if action == "edit":
         socketio.emit("status", "Editing image...")
         return edit_image(prompt)
-    if "video" in response:
+    if action == "video":
         socketio.emit("status", "Generating video from image...")
         return generate_video_from_image()
-    if "undo" in response:
+    if action == "undo":
         socketio.emit("status", "Reverting to previous image...")
         return previous_image()
-    if "error" in response:
-        return jsonify({"error": response["error"]})
+    if action == "error":
+        return jsonify({"error": prompt})
+
+def llm_sd_prompt_craf(input):
+    file_path = 'prompts.csv'
+    prompts_df = pd.read_csv(file_path)
+    sample_prompts = prompts_df.sample(10).to_string(index=False, header=False)
+    text = Path('llm_instructions_image_gen.txt').read_text()
+    text = text.replace("<sample-prompts>", sample_prompts)
+    text = text.replace("<image-idea>", input)
+    return llm.invoke(text)
+
+def llm_process_command(input):
+    return llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", input))
 
 def progress(pipe, step: int, timestep: int, callback_kwargs):
     print(f"Progress: Step {step}, Timestep {timestep}")
     socketio.emit("status", f"Generating, Step {step+1}")
-    #latents = callback_kwargs["latents"]
-    #image = latents_to_rgb(latents)
-    #image.save(f"{step}.png")
     return callback_kwargs
-
-def latents_to_rgb(latents):
-    weights = (
-        (60, -60, 25, -70),
-        (60,  -5, 15, -50),
-        (60,  10, -5, -35)
-    )
-    weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
-    biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
-    rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
-    image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
-    image_array = image_array.transpose(1, 2, 0)
-    return Image.fromarray(image_array)
 
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
-    txt2img = load_sdxl_lightning()
+    #txt2img = load_sdxl_lightning()
     image = txt2img(
-        prompt, 
+        prompt,
+        #negative_prompt=Path('sd_negative_prompt.txt').read_text(),
         num_inference_steps=4, 
         guidance_scale=0,
-        callback_on_step_end=progress,
-        callback_on_step_end_tensor_inputs=["latents"]
+        callback_on_step_end=progress
     ).images[0]
-    unload_model(txt2img)
+    #unload_model(txt2img)
     print("Image generated!")
     image.save("generated_image.webp")
     return send_file("generated_image.webp", mimetype="image/webp")
@@ -188,9 +204,8 @@ def edit_image(prompt):
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
+        #negative_prompt=Path('sd_negative_prompt.txt').read_text(),
         image=image,
-        guidance_scale=3,
-        image_guidance_scale=1,
         num_inference_steps=10,
         callback_on_step_end=progress
     ).images[0]
@@ -234,7 +249,6 @@ def generate_video_from_image():
     frames = img2vid(
         image, 
         decode_chunk_size=2, 
-        num_frames=7,
         num_inference_steps=10,
         callback_on_step_end=progress
     ).frames[0]

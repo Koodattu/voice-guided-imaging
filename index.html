@@ -19,6 +19,12 @@
         font-family: "Exo", sans-serif;
         background: #070815;
         color: white;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
       }
       h1 {
         text-align: center;
@@ -31,6 +37,11 @@
       h3 {
         text-align: center;
         font-weight: lighter;
+      }
+      h5 {
+        text-align: center;
+        font-weight: lighter;
+        margin-bottom: -10px;
       }
       .p-text {
         font-size: 1.2rem;
@@ -45,6 +56,34 @@
       .flex-horizontal {
         display: flex;
         align-items: center;
+      }
+
+      .container {
+        display: flex;
+        align-items: center;
+        width: 100%;
+      }
+
+      .custom-textarea {
+        flex: 1;
+        margin: 0 10px;
+        padding: 10px;
+        color: white;
+        background-color: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.623);
+        border-radius: 5px;
+        resize: none;
+        font-size: 1.2em;
+        pointer-events: none;
+        font-family: "Exo", sans-serif;
+        width: 300px;
+        height: 100px;
+      }
+
+      .arrow {
+        color: white;
+        font-size: 1.5em;
+        white-space: nowrap;
       }
     </style>
   </head>
@@ -67,14 +106,29 @@
       <label> <input type="checkbox" id="toggleRecording" /> Toggle recording:&nbsp;</label>
       <p style="color: lightcoral" id="recording_status">Disabled</p>
     </div>
-    <div>
-      <div class="flex-horizontal">
-        <p class="p-text">Transcription:&nbsp;</p>
-        <p class="p-text" id="transcription"></p>
+    <div class="container">
+      <div>
+        <h5>Whisper</h5>
+        <h3>Transcription</h3>
+        <textarea id="transcription" class="custom-textarea" tabindex="-1"></textarea>
       </div>
-      <div class="flex-horizontal">
-        <p class="p-text">Translation:&nbsp;</p>
-        <p class="p-text" id="translation"></p>
+      <div>
+        <div class="arrow">→</div>
+        <br></br>
+      </div>
+      <div>
+        <h5>Whisper</h5>
+        <h3>Translation</h3>
+        <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
+      </div>
+      <div>
+        <div class="arrow">→</div>
+        <br></br>
+      </div>
+      <div>
+        <h5>Mistral</h5>
+        <h3>Processed</h3>
+        <textarea id="llm_response" class="custom-textarea" tabindex="-1"></textarea>
       </div>
     </div>
     <div class="flex-center">
@@ -84,6 +138,7 @@
     <script>
       const transcription = document.getElementById("transcription");
       const translation = document.getElementById("translation");
+      const llm_response = document.getElementById("llm_response");
       const general_status = document.getElementById("general_status");
       const recording_status = document.getElementById("recording_status");
       const toggleRecording = document.getElementById("toggleRecording");
@@ -172,6 +227,11 @@
           await processCommand(data);
         });
 
+        socket.on("llm_response", async (data) => {
+          general_status.innerText = "LLM response received";
+          llm_response.innerText = data;
+        });
+
         socket.on("status", (data) => {
           console.log("Status: " + data);
           general_status.innerText = data;
@@ -225,6 +285,7 @@
         if (response.headers.get("content-type") === "application/json") {
           general_status.innerText = "Error: " + (await response.json()).error;
           backendProcessing = false;
+          shouldClearTranscription = true;
           updateRecordingStatusStyle();
           return;
         }
