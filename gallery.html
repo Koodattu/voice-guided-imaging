@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Gallery</title>
+    <style>
+      .gallery {
+        display: flex;
+        flex-wrap: wrap;
+      }
+      .gallery img {
+        width: 200px;
+        height: auto;
+        margin: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Image Gallery</h1>
+    <div class="gallery" id="gallery"></div>
+
+    <script>
+      let currentPage = 1;
+      const pageSize = 10;
+      const gallery = document.getElementById("gallery");
+
+      function fetchImages(page) {
+        fetch(`/images?page=${page}&page_size=${pageSize}`)
+          .then((response) => response.json())
+          .then((images) => {
+            images.forEach((image) => {
+              const img = document.createElement("img");
+              img.src = `/images/${image}`;
+              img.alt = image;
+              gallery.appendChild(img);
+            });
+          })
+          .catch((error) => console.error("Error fetching images:", error));
+      }
+
+      function loadMoreImages() {
+        currentPage++;
+        fetchImages(currentPage);
+      }
+
+      // Initial load
+      fetchImages(currentPage);
+
+      // Infinite scroll
+      window.addEventListener("scroll", () => {
+        if (window.innerHeight + window.scrollY >= document.body.offsetHeight) {
+          loadMoreImages();
+        }
+      });
+    </script>
+  </body>
+</html>

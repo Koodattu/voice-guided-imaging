@@ -1,7 +1,10 @@
 import base64
 import io
+import os
+import random
+import string
 import whisper
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
@@ -146,7 +149,6 @@ def handle_llm_response(response):
     prompt = response["prompt"]
     socketio.emit("llm_response", prompt)
     if action == "create":
-        #prompt = llm_sd_prompt_craf(prompt).content
         print(f"LLM prompt: {prompt}")
         socketio.emit("llm_response", prompt)
         socketio.emit("status", "Creating new image...")
@@ -163,44 +165,49 @@ def handle_llm_response(response):
     if action == "error":
         return jsonify({"error": prompt})
 
-def llm_sd_prompt_craf(input):
-    file_path = 'prompts.csv'
-    prompts_df = pd.read_csv(file_path)
-    sample_prompts = prompts_df.sample(10).to_string(index=False, header=False)
-    text = Path('llm_instructions_image_gen.txt').read_text()
-    text = text.replace("<sample-prompts>", sample_prompts)
-    text = text.replace("<image-idea>", input)
-    return llm.invoke(text)
-
 def llm_process_command(input):
     return llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", input))
 
 def progress(pipe, step: int, timestep: int, callback_kwargs):
-    print(f"Progress: Step {step}, Timestep {timestep}")
     socketio.emit("status", f"Generating, Step {step+1}")
+    if "StableVideoDiffusion" in str(pipe):
+        return callback_kwargs
+    latents = callback_kwargs["latents"]
+    image = latents_to_rgb(latents)
+    buffered = io.BytesIO()
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    socketio.emit("image_progress", img_str)
     return callback_kwargs
+
+def latents_to_rgb(latents):
+    weights = (
+        (60, -60, 25, -70),
+        (60,  -5, 15, -50),
+        (60,  10, -5, -35)
+    )
+    weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
+    biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
+    rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
+    image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
+    image_array = image_array.transpose(1, 2, 0)
+    return Image.fromarray(image_array)
 
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
-    #txt2img = load_sdxl_lightning()
     image = txt2img(
         prompt,
-        #negative_prompt=Path('sd_negative_prompt.txt').read_text(),
-        num_inference_steps=4, 
+        num_inference_steps=40, 
         guidance_scale=0,
         callback_on_step_end=progress
     ).images[0]
-    #unload_model(txt2img)
-    print("Image generated!")
     image.save("generated_image.webp")
     return send_file("generated_image.webp", mimetype="image/webp")
 
 def edit_image(prompt):
     print(f"Editing image with prompt: {prompt}")
     image = Image.open("generated_image.webp")
-    resolution = 512
-    resolution_hd = 1024
-    image = image.resize((resolution, resolution))
+    image = image.resize((768, 768))
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
@@ -211,7 +218,7 @@ def edit_image(prompt):
     ).images[0]
     unload_model(pix2pix)
     print("Edited image!")
-    image = image.resize((resolution_hd, resolution_hd))
+    image = image.resize((1024, 1024))
     image.save("edited_image.webp")
     return send_file("edited_image.webp", mimetype="image/webp")
 
@@ -258,9 +265,51 @@ def generate_video_from_image():
     mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
     return send_file("generated_video.webp", mimetype="image/webp")
 
+@app.route("/images/<image>")
+def get_image(image):
+    return send_from_directory("./gallery/thumbnails", image)
+
+@app.route("/images")
+def images():
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 10, type=int)
+    images = os.listdir("./gallery/thumbnails")
+    start = (page - 1) * page_size
+    end = start + page_size
+    return jsonify(images[start:end])
+
+def get_sorted_images_by_date(folder_path):
+    files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(folder_path, f)))
+    return files
+
+def get_previous_image(folder_path, file_name):
+    files = get_sorted_images_by_date(folder_path)
+    index = files.index(file_name)
+    if index == 0:
+        return None
+    return files[index - 1]
+
+def random_image_name(prompt, length=6):
+    words = prompt.split()[:4]
+    words = "-".join(words)
+    random_name = ''.join(random.choices(string.ascii_letters, k=length))
+    return words + "-" + random_name
+
+def save_image(image, prompt):
+    image_name = random_image_name(prompt)
+    image.save(f"./gallery/{image_name}.webp")
+    image = image.resize((256, 256))
+    image.save(f"./gallery/thumbnails/{image_name}.webp")
+    return image_name
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+@app.route("/gallery")
+def gallery():
+    return render_template("gallery.html")
 
 if __name__ == "__main__":
     print("Server started, ready to go!")

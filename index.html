@@ -5,7 +5,6 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tietoprovinssi Voice-Image-Edit</title>
-
     <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- frontend backend communication -->
     <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
@@ -14,45 +13,53 @@
     <!-- vad for audio recording -->
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad/dist/index.browser.js"></script>
     <style>
+      * {
+        margin: 0;
+        padding: 0;
+      }
       body {
         font-family: sans-serif;
         font-family: "Exo", sans-serif;
         background: #070815;
         color: white;
-        margin: 0;
-        padding: 0;
         display: flex;
         flex-direction: column;
-        align-items: center;
-        justify-content: center;
+        height: 100vh;
       }
+
       h1 {
         text-align: center;
         font-weight: lighter;
       }
+
       h2 {
         text-align: center;
         font-weight: lighter;
       }
+
       h3 {
         text-align: center;
         font-weight: lighter;
       }
+
       h5 {
         text-align: center;
         font-weight: lighter;
         margin-bottom: -10px;
       }
+
       .p-text {
         font-size: 1.2rem;
         color: white;
         font-family: "Exo", sans-serif;
       }
+
       .flex-center {
         display: flex;
         align-items: center;
         justify-content: center;
       }
+
       .flex-horizontal {
         display: flex;
         align-items: center;
@@ -60,6 +67,7 @@
 
       .container {
         display: flex;
+        flex-direction: column;
         align-items: center;
         width: 100%;
       }
@@ -73,7 +81,7 @@
         border: 1px solid rgba(255, 255, 255, 0.623);
         border-radius: 5px;
         resize: none;
-        font-size: 1.2em;
+        font-size: 1em;
         pointer-events: none;
         font-family: "Exo", sans-serif;
         width: 300px;
@@ -85,54 +93,85 @@
         font-size: 1.5em;
         white-space: nowrap;
       }
+
+      .sides {
+        height: 100vh;
+        display: flex;
+      }
+
+      .left-side {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+        width: 30%;
+      }
+
+      .right-side {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        flex-grow: 1;
+      }
+
+      #generated_image {
+        max-width: 70%;
+        max-height: 70%;
+        width: auto;
+        height: 100%;
+        object-fit: contain;
+      }
     </style>
   </head>
   <body>
-    <h1>Tietoprovinssi Demo - Voice Guided AI Image Editing</h1>
-    <h2>GPT Lab Seinäjoki</h2>
-    <div class="flex-center">
-      <p>Status:&nbsp;</p>
-      <p id="general_status">Waiting...</p>
-    </div>
-    <div class="flex-center">
-      <input type="radio" id="rb_auto" name="rb_lang" checked="true" />
-      <label for="rb_auto">Auto</label>
-      <input type="radio" id="rb_en" name="rb_lang" />
-      <label for="rb_en">English</label>
-      <input type="radio" id="rb_fi" name="rb_lang" />
-      <label for="rb_fi">Finnish</label>
-    </div>
-    <div class="flex-center">
-      <label> <input type="checkbox" id="toggleRecording" /> Toggle recording:&nbsp;</label>
-      <p style="color: lightcoral" id="recording_status">Disabled</p>
-    </div>
-    <div class="container">
-      <div>
-        <h5>Whisper</h5>
-        <h3>Transcription</h3>
-        <textarea id="transcription" class="custom-textarea" tabindex="-1"></textarea>
+    <h1>Tietoprovinssi Demo - Voice Guided AI Image Editing - GPT Lab Seinäjoki</h1>
+    <div class="sides">
+      <div class="left-side">
+        <div class="flex-center">
+          <p>Status:&nbsp;</p>
+          <p id="general_status">Waiting...</p>
+        </div>
+        <div class="flex-center">
+          <input type="radio" id="rb_auto" name="rb_lang" checked="true" />
+          <label for="rb_auto">Auto</label>
+          <input type="radio" id="rb_en" name="rb_lang" />
+          <label for="rb_en">English</label>
+          <input type="radio" id="rb_fi" name="rb_lang" />
+          <label for="rb_fi">Finnish</label>
+        </div>
+        <div class="flex-center">
+          <label> <input type="checkbox" id="toggleRecording" /> Toggle recording:&nbsp;</label>
+          <p style="color: lightcoral" id="recording_status">Disabled</p>
+        </div>
+        <div class="container">
+          <div>
+            <h5>Whisper</h5>
+            <h3>Transcription</h3>
+            <textarea id="transcription" class="custom-textarea" tabindex="-1"></textarea>
+          </div>
+          <div>
+            <div class="arrow">→</div>
+          </div>
+          <div>
+            <h5>Whisper</h5>
+            <h3>Translation</h3>
+            <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
+          </div>
+          <div>
+            <div class="arrow">→</div>
+          </div>
+          <div>
+            <h5>Mistral</h5>
+            <h3>Processed</h3>
+            <textarea id="llm_response" class="custom-textarea" tabindex="-1"></textarea>
+          </div>
+        </div>
       </div>
-      <div>
-        <div class="arrow">→</div>
-        <br></br>
+      <div class="right-side">
+        <img id="generated_image" src="https://image.pngaaa.com/495/4827495-small.png" />
       </div>
-      <div>
-        <h5>Whisper</h5>
-        <h3>Translation</h3>
-        <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
-      </div>
-      <div>
-        <div class="arrow">→</div>
-        <br></br>
-      </div>
-      <div>
-        <h5>Mistral</h5>
-        <h3>Processed</h3>
-        <textarea id="llm_response" class="custom-textarea" tabindex="-1"></textarea>
-      </div>
-    </div>
-    <div class="flex-center">
-      <img id="generated_image" style="display: none; max-width: 100%" />
     </div>
 
     <script>
@@ -217,6 +256,7 @@
         });
 
         socket.on("transcription", (data) => {
+          console.log(transcription.innerText);
           general_status.innerText = "Transcription received";
           transcription.innerText = (transcription.innerText + data).replace(".", " ").replace("  ", " ");
         });
@@ -235,6 +275,11 @@
         socket.on("status", (data) => {
           console.log("Status: " + data);
           general_status.innerText = data;
+        });
+
+        socket.on("image_progress", (data) => {
+          console.log("Image progress received: " + data);
+          generated_image.src = "data:image/png;base64," + data;
         });
 
         socket.on("disconnect", () => {
