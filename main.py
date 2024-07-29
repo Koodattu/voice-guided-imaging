@@ -197,11 +197,12 @@ def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
     image = txt2img(
         prompt,
-        num_inference_steps=40, 
+        num_inference_steps=4, 
         guidance_scale=0,
         callback_on_step_end=progress
     ).images[0]
     image.save("generated_image.webp")
+    save_image(image, prompt)
     return send_file("generated_image.webp", mimetype="image/webp")
 
 def edit_image(prompt):
@@ -220,6 +221,7 @@ def edit_image(prompt):
     print("Edited image!")
     image = image.resize((1024, 1024))
     image.save("edited_image.webp")
+    save_image(image, prompt)
     return send_file("edited_image.webp", mimetype="image/webp")
 
 def previous_image():
@@ -265,6 +267,10 @@ def generate_video_from_image():
     mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
     return send_file("generated_video.webp", mimetype="image/webp")
 
+@app.route("/images/full/<image>")
+def get_image_full(image):
+    return send_from_directory("./gallery", image)
+
 @app.route("/images/<image>")
 def get_image(image):
     return send_from_directory("./gallery/thumbnails", image)
@@ -297,6 +303,10 @@ def random_image_name(prompt, length=6):
     return words + "-" + random_name
 
 def save_image(image, prompt):
+    if not os.path.exists("./gallery"):
+        os.makedirs("./gallery")
+    if not os.path.exists("./gallery/thumbnails"):
+        os.makedirs("./gallery/thumbnails")
     image_name = random_image_name(prompt)
     image.save(f"./gallery/{image_name}.webp")
     image = image.resize((256, 256))
