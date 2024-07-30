@@ -71,6 +71,11 @@
         flex-direction: row;
       }
 
+      .flex-vertical {
+        display: flex;
+        flex-direction: column;
+      }
+
       .container {
         display: flex;
         align-items: center;
@@ -139,8 +144,8 @@
         border-radius: 8px;
         padding: 8px;
         display: flex;
-        align-items: center;
-        flex-direction: row;
+        align-items: start;
+        flex-direction: column;
       }
 
       .mic-icon {
@@ -180,7 +185,7 @@
         bottom: 0;
         width: 150px;
         margin: 10px;
-        opacity: 0.5;
+        opacity: 1;
       }
 
       .jr-image {
@@ -188,7 +193,7 @@
         left: 0;
         bottom: 0;
         height: 250px;
-        opacity: 0.5;
+        opacity: 1;
       }
 
       .hb::before {
@@ -237,28 +242,34 @@
     <div class="controls-content">
       <div>
         <div class="flex-horizontal">
-          <h3 class="width-125">Microphone:</h3>
+          <h3>Recording:&nbsp;&nbsp;</h3>
           <div id="mic_status_box" class="mic-status">
-            <i id="mic_icon_closed" class="fa fa-microphone-slash mic-icon" style="display: block"></i>
-            <i id="mic_icon_open" class="fa fa-microphone mic-icon" style="display: none"></i>
-            <p id="mic_status_txt" class="font-bold">Disabled</p>
+            <label> <input class="cb-input" type="checkbox" id="toggleRecording" />Enable</label>
+            <div class="flex-horizontal">
+              <i id="mic_icon_closed" class="fa fa-microphone-slash mic-icon" style="display: block"></i>
+              <i id="mic_icon_open" class="fa fa-microphone mic-icon" style="display: none"></i>
+              <p id="mic_status_txt" class="font-bold">Disabled</p>
+            </div>
           </div>
-        </div>
-        <div class="flex-horizontal">
-          <h3 class="width-125">System:</h3>
-          <p id="system_status" class="font-bold width-250">Done! Waiting for input...</p>
         </div>
       </div>
       <div class="input-container height-50">
-        <label> <input class="cb-input" type="checkbox" id="toggleRecording" />Enable Recording</label>
         <div class="flex-center">
-          <label>Language:</label>
-          <input class="rb-input" type="radio" id="rb_auto" name="rb_lang" checked="true" />
-          <label for="rb_auto">Auto</label>
-          <input class="rb-input" type="radio" id="rb_en" name="rb_lang" />
-          <label for="rb_en">English</label>
-          <input class="rb-input" type="radio" id="rb_fi" name="rb_lang" />
-          <label for="rb_fi">Finnish</label>
+          <h3>Language:&nbsp;</h3>
+          <div class="flex-vertical">
+            <div>
+              <input class="rb-input" type="radio" id="rb_auto" name="rb_lang" checked="true" />
+              <label for="rb_auto">Auto</label>
+            </div>
+            <div>
+              <input class="rb-input" type="radio" id="rb_en" name="rb_lang" />
+              <label for="rb_en">English</label>
+            </div>
+            <div>
+              <input class="rb-input" type="radio" id="rb_fi" name="rb_lang" />
+              <label for="rb_fi">Finnish</label>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -295,6 +306,11 @@
       </div>
     </div>
 
+    <div>
+      <h5>System Status</h5>
+      <h3 id="system_status" class="font-bold">Waiting for input...</h3>
+    </div>
+
     <div class="image-container">
       <img id="generated_image" src="https://mkantwerpen.be/wp-content/uploads/2020/01/placeholder.png" />
     </div>
@@ -306,6 +322,7 @@
       const toggleRecording = document.getElementById("toggleRecording");
       const generated_image = document.getElementById("generated_image");
 
+      const mic_status_box = document.getElementById("mic_status_box");
       const system_status = document.getElementById("system_status");
 
       const rb_auto = document.getElementById("rb_auto");
@@ -331,8 +348,8 @@
           positiveSpeechThreshold: 0.8,
           negativeSpeechThreshold: 0.8 - 0.15,
           minSpeechFrames: 1,
-          preSpeechPadFrames: 1,
-          redemptionFrames: 2,
+          preSpeechPadFrames: 2,
+          redemptionFrames: 3,
           onSpeechStart: () => {
             if (!recordingEnabled || backendProcessing) {
               return;
@@ -344,6 +361,7 @@
               shouldClearTranscription = false;
             }
             console.log("Speech start");
+            mic_status_box.style.boxShadow = "0 0 3px 3px lightgreen";
             clearTimeout(speechTimer);
           },
           onSpeechEnd: (audio) => {
@@ -351,11 +369,13 @@
               return;
             }
             console.log("Speech end");
+            mic_status_box.style.boxShadow = "";
+            if (!socket || !socket.connected) {
+              return;
+            }
             const wavBuffer = vad.utils.encodeWAV(audio);
             const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
-            if (socket && socket.connected) {
-              socket.emit("audio_data", base64);
-            }
+            socket.emit("audio_data", base64);
             lastSpeechEndTime = Date.now();
             speechTimer = setTimeout(() => {
               if (Date.now() - lastSpeechEndTime >= 3000) {
@@ -388,13 +408,13 @@
 
         socket.on("translation", async (data) => {
           system_status.innerText = "Translation received";
-          translation.innerText = data;
+          translation.value = data;
           await processCommand(data);
         });
 
         socket.on("llm_response", async (data) => {
           system_status.innerText = "LLM response received";
-          llm_response.innerText = data;
+          llm_response.value = data;
         });
 
         socket.on("status", (data) => {
@@ -403,7 +423,6 @@
         });
 
         socket.on("image_progress", (data) => {
-          console.log("Image progress received: " + data);
           generated_image.src = "data:image/png;base64," + data;
         });
 
@@ -470,7 +489,6 @@
       }
 
       function updateMicStatusStyle() {
-        const mic_status_box = document.getElementById("mic_status_box");
         const mic_status_txt = document.getElementById("mic_status_txt");
         const mic_icon_closed = document.getElementById("mic_icon_closed");
         const mic_icon_open = document.getElementById("mic_icon_open");

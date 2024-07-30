@@ -139,18 +139,16 @@ def process_command():
     data = request.json
     command = data.get("command")
     print(f"Processing command: {command}")
-    result = llm_process_command(command)
-    return handle_llm_response(result.content)
+    return llm_process_command(command)
 
-def handle_llm_response(response):
-    print(f"LLM response: {response}")
-    response = json.loads(response)
+def llm_process_command(input):
+    result = llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", input))
+    print(f"LLM response: {result.content}")
+    response = json.loads(result.content)
     action = response["action"]
     prompt = response["prompt"]
-    socketio.emit("llm_response", prompt)
+    socketio.emit("llm_response", action + ": " + prompt)
     if action == "create":
-        print(f"LLM prompt: {prompt}")
-        socketio.emit("llm_response", prompt)
         socketio.emit("status", "Creating new image...")
         return generate_image(prompt)
     if action == "edit":
@@ -164,9 +162,6 @@ def handle_llm_response(response):
         return previous_image()
     if action == "error":
         return jsonify({"error": prompt})
-
-def llm_process_command(input):
-    return llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", input))
 
 def progress(pipe, step: int, timestep: int, callback_kwargs):
     socketio.emit("status", f"Generating, Step {step+1}")
@@ -212,7 +207,6 @@ def edit_image(prompt):
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
-        #negative_prompt=Path('sd_negative_prompt.txt').read_text(),
         image=image,
         num_inference_steps=10,
         callback_on_step_end=progress
@@ -302,7 +296,7 @@ def random_image_name(prompt, length=6):
     random_name = ''.join(random.choices(string.ascii_letters, k=length))
     return words + "-" + random_name
 
-def save_image(image, prompt):
+def save_image(image, prompt, parent=None):
     if not os.path.exists("./gallery"):
         os.makedirs("./gallery")
     if not os.path.exists("./gallery/thumbnails"):
@@ -311,7 +305,24 @@ def save_image(image, prompt):
     image.save(f"./gallery/{image_name}.webp")
     image = image.resize((256, 256))
     image.save(f"./gallery/thumbnails/{image_name}.webp")
+    add_to_json_file(image_name, prompt, parent)
     return image_name
+
+def add_to_json_file(name, prompt, parent):
+    filename = "gallery.json"
+    if not os.path.exists(filename):
+        with open(filename, 'w') as file:
+            json.dump([], file)
+    with open(filename, 'r') as file:
+        data = json.load(file)
+    new_entry = {
+        "name": name,
+        "prompt": prompt,
+        "parent": parent
+    }
+    data.append(new_entry)
+    with open(filename, 'w') as file:
+        json.dump(data, file, indent=4)
 
 @app.route("/")
 def index():
