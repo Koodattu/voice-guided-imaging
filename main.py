@@ -2,6 +2,7 @@ import base64
 import io
 import os
 import random
+import shutil
 import string
 import whisper
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
@@ -138,11 +139,12 @@ def handle_translation():
 def process_command():
     data = request.json
     command = data.get("command")
+    image = data.get("image")
     print(f"Processing command: {command}")
-    return llm_process_command(command)
+    return llm_process_command(image, command)
 
-def llm_process_command(input):
-    result = llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", input))
+def llm_process_command(image, command):
+    result = llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", command))
     print(f"LLM response: {result.content}")
     response = json.loads(result.content)
     action = response["action"]
@@ -153,10 +155,10 @@ def llm_process_command(input):
         return generate_image(prompt)
     if action == "edit":
         socketio.emit("status", "Editing image...")
-        return edit_image(prompt)
+        return edit_image(image, prompt)
     if action == "video":
         socketio.emit("status", "Generating video from image...")
-        return generate_video_from_image()
+        return generate_video_from_image(image, prompt)
     if action == "undo":
         socketio.emit("status", "Reverting to previous image...")
         return previous_image()
@@ -196,14 +198,13 @@ def generate_image(prompt):
         guidance_scale=0,
         callback_on_step_end=progress
     ).images[0]
-    image.save("generated_image.webp")
-    save_image(image, prompt)
-    return send_file("generated_image.webp", mimetype="image/webp")
+    image = save_image(image, prompt)
+    return jsonify({"image": image, "prompt": prompt})
 
-def edit_image(prompt):
+def edit_image(parent_image, prompt):
     print(f"Editing image with prompt: {prompt}")
-    image = Image.open("generated_image.webp")
-    image = image.resize((768, 768))
+    image = Image.open("./gallery/" + parent_image + ".webp")
+    #image = image.resize((768, 768))
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
@@ -213,10 +214,9 @@ def edit_image(prompt):
     ).images[0]
     unload_model(pix2pix)
     print("Edited image!")
-    image = image.resize((1024, 1024))
-    image.save("edited_image.webp")
-    save_image(image, prompt)
-    return send_file("edited_image.webp", mimetype="image/webp")
+    #image = image.resize((1024, 1024))
+    image = save_image(image, prompt, parent=parent_image)
+    return jsonify({"image": image, "prompt": prompt})
 
 def previous_image():
     print("Going to previous image")
@@ -244,9 +244,9 @@ def mp4_to_webp(mp4_path, webp_path, fps):
         loop=0
     )
 
-def generate_video_from_image():
+def generate_video_from_image(parent_image, prompt):
     print("Generating video from image...")
-    image = Image.open("generated_image.webp")
+    image = Image.open("./gallery/" + parent_image + ".webp")
     image = image.resize((1024, 576))
     img2vid = load_video_diffusion()
     frames = img2vid(
@@ -259,24 +259,23 @@ def generate_video_from_image():
     unload_model(img2vid)
     export_to_video(frames, "generated_video.mp4", fps=7)
     mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
-    return send_file("generated_video.webp", mimetype="image/webp")
-
-@app.route("/images/full/<image>")
-def get_image_full(image):
-    return send_from_directory("./gallery", image)
+    image = Image.open("generated_video.webp")
+    image = save_image(image, prompt, parent=parent_image)
+    shutil.copyfile("generated_video.webp", "./gallery/" + image + ".webp")
+    return jsonify({"image": image, "prompt": prompt})
 
 @app.route("/images/<image>")
 def get_image(image):
-    return send_from_directory("./gallery/thumbnails", image)
+    return send_from_directory("./gallery", image + ".webp")
 
 @app.route("/images")
 def images():
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 10, type=int)
-    images = os.listdir("./gallery/thumbnails")
-    start = (page - 1) * page_size
-    end = start + page_size
-    return jsonify(images[start:end])
+    gallery_json = "gallery.json"
+    if not os.path.exists(gallery_json):
+        return jsonify([])
+    with open(gallery_json, 'r') as file:
+        images = json.load(file)
+    return jsonify(images)
 
 def get_sorted_images_by_date(folder_path):
     files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
