@@ -446,7 +446,6 @@
         },
       });
       body.onmousemove = (e) => {
-        console.log(e.clientX, e.clientY);
         panzoom_element.setTransformOrigin({
           x: e.clientX / window.innerWidth - 0.3,
           y: e.clientY / window.innerHeight,

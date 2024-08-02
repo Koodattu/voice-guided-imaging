@@ -34,7 +34,7 @@ llm = ChatOllama(model="mistral:instruct")
 print(llm.invoke("Respond with: Mistral-instruct ready to server!").content)
 
 print("Loading WHISPER model...")
-whisper_model = whisper.load_model("small").to(device)
+whisper_model = whisper.load_model("medium").to(device)
 print("WHISPER model loaded successfully!")
 
 print("Loading SDXL-Lightning model...")
@@ -203,7 +203,7 @@ def generate_image(prompt):
 
 def edit_image(parent_image, prompt):
     print(f"Editing image with prompt: {prompt}")
-    image = Image.open("./gallery/" + parent_image + ".webp")
+    image = get_saved_image(parent_image)
     #image = image.resize((768, 768))
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
@@ -246,7 +246,7 @@ def mp4_to_webp(mp4_path, webp_path, fps):
 
 def generate_video_from_image(parent_image, prompt):
     print("Generating video from image...")
-    image = Image.open("./gallery/" + parent_image + ".webp")
+    image = get_saved_image(parent_image)
     image = image.resize((1024, 576))
     img2vid = load_video_diffusion()
     frames = img2vid(
@@ -263,6 +263,18 @@ def generate_video_from_image(parent_image, prompt):
     image = save_image(image, prompt, parent=parent_image)
     shutil.copyfile("generated_video.webp", "./gallery/" + image + ".webp")
     return jsonify({"image": image, "prompt": prompt})
+
+def get_saved_image(image_name):
+    path = f"./gallery/{image_name}.webp"
+    file_size = os.path.getsize(path)
+    if file_size < 500 * 1024:
+        return Image.open(path)
+    gallery_json = json.load(open("gallery.json", "r"))
+    for obj in gallery_json:
+        if obj["name"] == image_name:
+            if obj["parent"]:
+                return get_saved_image(obj["parent"])
+    return None
 
 @app.route("/gallery")
 def get_gallery_json():

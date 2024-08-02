@@ -298,5 +298,35 @@
         "name": "Add-one-more-dolphin-rHBWBT",
         "prompt": "Add one more dolphin to the picture",
         "parent": "Add-one-more-Delphi-eSDvuD"
+    },
+    {
+        "name": "Generating-a-video-based-vcgWXG",
+        "prompt": "Generating a video based on the given description",
+        "parent": "remove-the-car-yHhzDm"
+    },
+    {
+        "name": "Generating-a-video-from-hhRDTn",
+        "prompt": "Generating a video from your provided input",
+        "parent": "Generating-a-video-based-vcgWXG"
+    },
+    {
+        "name": "Generating-a-video.-Adding-QzKngL",
+        "prompt": "Generating a video. Adding food in the sky",
+        "parent": "Generating-a-video-from-hhRDTn"
+    },
+    {
+        "name": "add-fireworks-to-the-qUqqDQ",
+        "prompt": "add fireworks to the sky",
+        "parent": "Generating-a-video.-Adding-QzKngL"
+    },
+    {
+        "name": "Add-fireworks-to-the-xXkKOX",
+        "prompt": "Add fireworks to the sky",
+        "parent": "add-fireworks-to-the-qUqqDQ"
+    },
+    {
+        "name": "Add-fireworks-to-the-fasDCm",
+        "prompt": "Add fireworks to the sky",
+        "parent": "Generating-a-video-from-wemOVR"
     }
 ]
