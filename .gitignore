@@ -166,3 +166,4 @@ cython_debug/
 *.wav
 *.webp
 *.mp4
+gallery.json

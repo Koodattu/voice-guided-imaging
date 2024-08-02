@@ -233,5 +233,35 @@
         "name": "Generating-a-video-from-wemOVR",
         "prompt": "Generating a video from the given image",
         "parent": "a-man-driving-in-xmMpnm"
+    },
+    {
+        "name": "a-new-image-of-QWrTgd",
+        "prompt": "a new image of a planet",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-QUaWHm",
+        "prompt": "Generating a video",
+        "parent": "a-new-image-of-QWrTgd"
+    },
+    {
+        "name": "a-group-photo-of-ubMuNS",
+        "prompt": "a group photo of the Backstreet Boys",
+        "parent": null
+    },
+    {
+        "name": "Make-characters-wear-hats.-oTFzwJ",
+        "prompt": "Make characters wear hats.",
+        "parent": "a-group-photo-of-ubMuNS"
+    },
+    {
+        "name": "Change-the-gender-of-uHdQfU",
+        "prompt": "Change the gender of the subjects to female",
+        "parent": "Make-characters-wear-hats.-oTFzwJ"
+    },
+    {
+        "name": "Change-the-background-to-yDoRnJ",
+        "prompt": "Change the background to a scenery of a lake and mountains",
+        "parent": "Change-the-gender-of-uHdQfU"
     }
 ]
