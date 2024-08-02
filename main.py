@@ -34,7 +34,7 @@ llm = ChatOllama(model="mistral:instruct")
 print(llm.invoke("Respond with: Mistral-instruct ready to server!").content)
 
 print("Loading WHISPER model...")
-whisper_model = whisper.load_model("medium").to(device)
+whisper_model = whisper.load_model("small").to(device)
 print("WHISPER model loaded successfully!")
 
 print("Loading SDXL-Lightning model...")
@@ -263,6 +263,10 @@ def generate_video_from_image(parent_image, prompt):
     image = save_image(image, prompt, parent=parent_image)
     shutil.copyfile("generated_video.webp", "./gallery/" + image + ".webp")
     return jsonify({"image": image, "prompt": prompt})
+
+@app.route("/gallery")
+def get_gallery_json():
+    return send_file("gallery.json", mimetype="application/json")
 
 @app.route("/images/<image>")
 def get_image(image):

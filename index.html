@@ -14,7 +14,12 @@
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad/dist/index.browser.js"></script>
     <!-- font awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" />
+    <!-- speech bubble font -->
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:ital,wght@1,700&display=swap" rel="stylesheet" />
+    <!-- tree view visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/treant-js/1.0/Treant.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.js"></script>
+    <script src="https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js"></script>
     <style>
       * {
         margin: 0;
@@ -301,13 +306,48 @@
           flex: 1 1 calc(100% - 10px);
         }
       }
+
+      #panzoom_parent {
+        display: none;
+      }
+
+      .node {
+        position: absolute;
+      }
+
+      .node img {
+        width: 100px;
+        height: 100px;
+      }
+
+      .node img:hover {
+        cursor: pointer;
+        filter: brightness(1.1);
+        transform: scale(1.025);
+        transition: all 0.25s ease-in-out;
+      }
+      .node p {
+        font-size: 8px;
+        line-height: 10px;
+        font-weight: bold;
+        padding: 3px;
+        border: 2px solid white;
+        background: #070815;
+        width: 48px;
+      }
     </style>
   </head>
-  <body>
+  <body id="body">
     <div class="main-page" id="main_page">
-      <img class="logo-image" src="./assets/gpt-lab-sjk-v2.png" />
+      <img
+        class="logo-image"
+        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gpt-lab-sjk-v2.png"
+      />
       <div class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
-      <img class="jr-image" src="./assets/jr.png" />
+      <img
+        class="jr-image"
+        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png"
+      />
       <h1>Tietoprovinssi Demo - Voice Guided AI Image Editing - GPT Lab Seinäjoki</h1>
 
       <div class="controls-content">
@@ -390,9 +430,28 @@
 
     <div class="gallery" id="gallery"></div>
 
+    <div id="panzoom_parent">
+      <div class="tree-view" id="tree_view"></div>
+    </div>
+
     <script>
+      const body = document.getElementById("body");
       const main_page = document.getElementById("main_page");
       const gallery = document.getElementById("gallery");
+      const tree_view = document.getElementById("tree_view");
+      const panzoom_parent = document.getElementById("panzoom_parent");
+      const panzoom_element = panzoom(panzoom_parent, {
+        beforeWheel: function (e) {
+          return panzoom_parent.style.display === "none";
+        },
+      });
+      body.onmousemove = (e) => {
+        console.log(e.clientX, e.clientY);
+        panzoom_element.setTransformOrigin({
+          x: e.clientX / window.innerWidth - 0.3,
+          y: e.clientY / window.innerHeight,
+        });
+      };
 
       const transcription = document.getElementById("transcription");
       const translation = document.getElementById("translation");
@@ -407,6 +466,7 @@
       const rb_en = document.getElementById("rb_en");
       const rb_fi = document.getElementById("rb_fi");
 
+      let ignoreScroll = true;
       let recordingEnabled = false;
       let backendProcessing = false;
       let shouldClearTranscription = false;
@@ -542,6 +602,9 @@
           updateGallery();
           main_page.style.display = "none";
           gallery.style.display = "flex";
+          panzoom_parent.style.display = "none";
+          body.style.overflow = "auto";
+          body.style.cursor = "default";
         });
       }
       main();
@@ -622,10 +685,12 @@
                 img.src = `/images/${image.name}`;
                 img.alt = image.name;
                 img.addEventListener("click", () => {
-                  main_page.style.display = "flex";
+                  main_page.style.display = "none";
                   gallery.style.display = "none";
-                  generated_image.src = `/images/${image.name}`;
-                  generated_image.alt = image.name;
+                  panzoom_parent.style.display = "flex";
+                  body.style.overflow = "hidden";
+                  body.style.cursor = "move";
+                  generateTreeView(image.name);
                 });
 
                 const overlay = document.createElement("div");
@@ -641,6 +706,102 @@
             });
           })
           .catch((error) => console.error("Error fetching images:", error));
+      }
+
+      async function generateTreeView(image_name) {
+        const galleryJson = await fetch("/gallery").then((response) => response.json());
+
+        // Helper function to find node by name
+        function findNodeByName(name, nodes) {
+          return nodes.find((node) => node.name === name);
+        }
+
+        // Helper function to recursively build the tree structure
+        function buildTree(nodeName, nodes) {
+          const node = findNodeByName(nodeName, nodes);
+          if (!node) {
+            return null;
+          }
+          const children = nodes
+            .filter((n) => n.parent === nodeName)
+            .map((n) => buildTree(n.name, nodes))
+            .filter(Boolean);
+          return {
+            text: {
+              name: node.prompt,
+            },
+            children: [
+              {
+                image: `/images/${node.name}`,
+                children: children,
+              },
+            ],
+          };
+        }
+
+        // Find the root node (node with parent value of null)
+        function findRootNode(nodeName, nodes) {
+          let currentNode = findNodeByName(nodeName, nodes);
+          while (currentNode && currentNode.parent) {
+            currentNode = findNodeByName(currentNode.parent, nodes);
+          }
+          return currentNode;
+        }
+
+        const rootNode = findRootNode(image_name, galleryJson);
+        if (!rootNode) {
+          console.error("Root node not found");
+          return;
+        }
+
+        const nodeStructure = buildTree(rootNode.name, galleryJson);
+
+        const simple_chart_config = {
+          chart: {
+            container: "#tree_view",
+            rootOrientation: "WEST",
+            connectors: {
+              type: "curve",
+              style: {
+                "stroke-width": 2,
+                stroke: "white",
+              },
+              levelSeparation: 100,
+              siblingSeparation: 100,
+              subTeeSeparation: 100,
+              scrollbar: "None",
+            },
+          },
+          nodeStructure: nodeStructure,
+        };
+
+        const my_chart = new Treant(simple_chart_config);
+
+        const images = document.querySelectorAll(".node img");
+        images.forEach((img) => {
+          img.addEventListener("click", () => {
+            main_page.style.display = "flex";
+            gallery.style.display = "none";
+            panzoom_parent.style.display = "none";
+            generated_image.src = img.src;
+            generated_image.alt = img.src.split("/images/")[1];
+            body.style.overflow = "auto";
+            body.style.cursor = "default";
+          });
+        });
+        const screenSize = {
+          w: Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
+          h: Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
+        };
+        const elemWid = tree_view.offsetWidth;
+        const elemHei = tree_view.offsetHeight;
+        let initalZoom =
+          screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
+        panzoom_element.zoomAbs(0, 0, initalZoom * 0.9);
+        panzoom_element.moveTo(
+          (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
+          (screenSize.h - elemHei * initalZoom) / 2
+        );
       }
     </script>
   </body>

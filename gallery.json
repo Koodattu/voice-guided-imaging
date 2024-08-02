@@ -263,5 +263,40 @@
         "name": "Change-the-background-to-yDoRnJ",
         "prompt": "Change the background to a scenery of a lake and mountains",
         "parent": "Change-the-gender-of-uHdQfU"
+    },
+    {
+        "name": "a-doll-shaped-like-iyCsUl",
+        "prompt": "a doll shaped like a pinhole",
+        "parent": null
+    },
+    {
+        "name": "an-image-of-a-UTVlST",
+        "prompt": "an image of a dolphin",
+        "parent": null
+    },
+    {
+        "name": "Add-another-doll-of-tpLIXI",
+        "prompt": "Add another doll of Fin to the image.",
+        "parent": "an-image-of-a-UTVlST"
+    },
+    {
+        "name": "Add-another-dolphin-SyMkmk",
+        "prompt": "Add another dolphin",
+        "parent": "an-image-of-a-UTVlST"
+    },
+    {
+        "name": "Add-one-more-Delphi-bPrSeF",
+        "prompt": "Add one more Delphi figure in the image",
+        "parent": "Add-another-dolphin-SyMkmk"
+    },
+    {
+        "name": "Add-one-more-Delphi-eSDvuD",
+        "prompt": "Add one more Delphi figure to the current image",
+        "parent": "Add-one-more-Delphi-bPrSeF"
+    },
+    {
+        "name": "Add-one-more-dolphin-rHBWBT",
+        "prompt": "Add one more dolphin to the picture",
+        "parent": "Add-one-more-Delphi-eSDvuD"
     }
 ]
