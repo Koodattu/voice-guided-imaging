@@ -328,5 +328,115 @@
         "name": "Add-fireworks-to-the-fasDCm",
         "prompt": "Add fireworks to the sky",
         "parent": "Generating-a-video-from-wemOVR"
+    },
+    {
+        "name": "a-man-driving-a-pCQkzo",
+        "prompt": "a man driving a rally car in Finland",
+        "parent": null
+    },
+    {
+        "name": "make-night-time-qoRXih",
+        "prompt": "make night time",
+        "parent": "a-man-driving-a-pCQkzo"
+    },
+    {
+        "name": "Make-it-snow-LRhOAG",
+        "prompt": "Make it snow",
+        "parent": "a-man-driving-a-pCQkzo"
+    },
+    {
+        "name": "Make-it-night-time-zptgTp",
+        "prompt": "Make it night time",
+        "parent": "Make-it-snow-LRhOAG"
+    },
+    {
+        "name": "change-the-color-of-zWJOTo",
+        "prompt": "change the color of the car to green",
+        "parent": "Make-it-night-time-zptgTp"
+    },
+    {
+        "name": "Change-the-color-of-rUuJao",
+        "prompt": "Change the color of the car from red to orange",
+        "parent": "Make-it-night-time-zptgTp"
+    },
+    {
+        "name": "Generating-a-video-LXwBXz",
+        "prompt": "Generating a video",
+        "parent": "Change-the-color-of-rUuJao"
+    },
+    {
+        "name": "Add-fireworks-to-the-EpNZro",
+        "prompt": "Add fireworks to the sky",
+        "parent": "Make-it-night-time-zptgTp"
+    },
+    {
+        "name": "Replace-the-current-background-TeCRGZ",
+        "prompt": "Replace the current background with a city skyline.",
+        "parent": "Make-it-night-time-zptgTp"
+    },
+    {
+        "name": "add-fireworks-to-the-TypZCO",
+        "prompt": "add fireworks to the sky",
+        "parent": "Make-it-snow-LRhOAG"
+    },
+    {
+        "name": "a-man-riding-a-ZuAMSL",
+        "prompt": "a man riding a bicycle on his way to the gym",
+        "parent": null
+    },
+    {
+        "name": "a-scene-set-in-FThpuB",
+        "prompt": "a scene set in a sauna",
+        "parent": null
+    },
+    {
+        "name": "a-man-walking-on-XRSxln",
+        "prompt": "a man walking on the street",
+        "parent": null
+    },
+    {
+        "name": "a-man-walking-on-ayNhyp",
+        "prompt": "a man walking on the roof of a skyscraper in a city",
+        "parent": null
+    },
+    {
+        "name": "add-fireworks-to-the-QuoTwM",
+        "prompt": "add fireworks to the sky",
+        "parent": "a-man-walking-on-ayNhyp"
+    },
+    {
+        "name": "Add-planets-to-the-FjZroP",
+        "prompt": "Add planets to the sky",
+        "parent": "a-man-walking-on-ayNhyp"
+    },
+    {
+        "name": "make-it-snow-uZQnwg",
+        "prompt": "make it snow",
+        "parent": "Add-planets-to-the-FjZroP"
+    },
+    {
+        "name": "a-man-sitting-on-PqhzLq",
+        "prompt": "a man sitting on stairs",
+        "parent": null
+    },
+    {
+        "name": "make-it-snow-jNYzKS",
+        "prompt": "make it snow",
+        "parent": "a-man-sitting-on-PqhzLq"
+    },
+    {
+        "name": "Replace-the-city-with-zhEphv",
+        "prompt": "Replace the city with mountains",
+        "parent": "Add-planets-to-the-FjZroP"
+    },
+    {
+        "name": "Add-a-sun-to-VGtjsy",
+        "prompt": "Add a sun to this guy",
+        "parent": "Replace-the-city-with-zhEphv"
+    },
+    {
+        "name": "Add-sun-to-the-SyFsas",
+        "prompt": "Add sun to the sky",
+        "parent": "Replace-the-city-with-zhEphv"
     }
 ]

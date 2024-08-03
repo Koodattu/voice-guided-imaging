@@ -161,7 +161,7 @@ def llm_process_command(image, command):
         return generate_video_from_image(image, prompt)
     if action == "undo":
         socketio.emit("status", "Reverting to previous image...")
-        return previous_image()
+        return previous_image(image)
     if action == "error":
         return jsonify({"error": prompt})
 
@@ -218,9 +218,16 @@ def edit_image(parent_image, prompt):
     image = save_image(image, prompt, parent=parent_image)
     return jsonify({"image": image, "prompt": prompt})
 
-def previous_image():
+def previous_image(image):
     print("Going to previous image")
-    return send_file("generated_image.webp", mimetype="image/webp")
+    image_file = get_previous_image("./gallery", image + ".webp")
+    image_file = image_file.replace(".webp", "")
+    gallery_json = json.load(open("gallery.json", "r"))
+    for obj in gallery_json:
+        if obj["name"] == image_file:
+            prompt = obj["prompt"]
+            break
+    return jsonify({"image": image_file, "prompt": prompt})
 
 def mp4_to_webp(mp4_path, webp_path, fps):
     clip = VideoFileClip(mp4_path)

@@ -103,7 +103,7 @@
         padding: 10px;
         color: white;
         background-color: transparent;
-        border: 1px solid rgba(255, 255, 255, 0.603);
+        border: 1px solid white;
         border-radius: 5px;
         resize: none;
         font-size: 1em;
@@ -132,15 +132,15 @@
         display: flex;
       }
 
-      .image-container {
-        display: flex;
-        align-items: center;
-        flex-grow: 1;
-      }
-
       .input-container {
         display: flex;
         flex-direction: column;
+      }
+
+      .gen-image-container {
+        display: flex;
+        align-items: center;
+        position: relative;
       }
 
       #generated_image {
@@ -148,6 +148,7 @@
         height: calc(100vh - 515px);
         width: auto;
         flex-grow: 1;
+        border-radius: 8px;
       }
 
       #generated_image:hover {
@@ -335,6 +336,45 @@
         background: #070815;
         width: 48px;
       }
+
+      .gen-image-buttons {
+        position: absolute;
+        display: flex;
+        width: 100%;
+        height: 100%;
+      }
+
+      .gallery_chart_button {
+        position: relative;
+        width: 50%;
+        border: none;
+        padding: 10px;
+        background: transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        opacity: 0;
+        background: gray;
+        color: white;
+        font-size: 4.5rem;
+        font-weight: bold;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .gallery_chart_button:hover {
+        opacity: 0.75;
+      }
+
+      .gallery_chart_button img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: cover;
+        transform: rotate(-90deg);
+        filter: brightness(0) invert(1);
+        opacity: 0.75;
+      }
     </style>
   </head>
   <body id="body">
@@ -392,7 +432,7 @@
             <h3>Live Transcription</h3>
             <textarea id="transcription" class="custom-textarea" tabindex="-1"></textarea>
           </div>
-          <div>
+          <div id="translation_arrows">
             <br />
             <div class="arrow">→</div>
             <div class="arrow">→</div>
@@ -403,7 +443,7 @@
             <h3>Full Translation</h3>
             <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
           </div>
-          <div>
+          <div id="llm_arrows">
             <br />
             <div class="arrow">→</div>
             <div class="arrow">→</div>
@@ -422,9 +462,20 @@
         <h3 id="system_status" class="font-bold">Waiting for connection...</h3>
       </div>
 
-      <div class="image-container">
+      <div class="gen-image-container">
         <img id="generated_image" src="https://mkantwerpen.be/wp-content/uploads/2020/01/placeholder.png" />
-        <div></div>
+        <div class="gen-image-buttons">
+          <button id="chart_button" class="gallery_chart_button">
+            CHART
+            <img
+              src="https://www.simplilearn.com/ice9/free_resources_article_thumb/Trees-in-csharp/Trees-in-CSharp-Types-BST-img1.png"
+            />
+          </button>
+          <button id="gallery_button" class="gallery_chart_button">
+            GALLERY
+            <img src="https://cdn3.iconfinder.com/data/icons/faticons/32/grid-2-01-512.png" />
+          </button>
+        </div>
       </div>
     </div>
 
@@ -465,6 +516,9 @@
       const rb_en = document.getElementById("rb_en");
       const rb_fi = document.getElementById("rb_fi");
 
+      const gallery_button = document.getElementById("gallery_button");
+      const chart_button = document.getElementById("chart_button");
+
       let ignoreScroll = true;
       let recordingEnabled = false;
       let backendProcessing = false;
@@ -498,6 +552,7 @@
               shouldClearTranscription = false;
             }
             console.log("Speech start");
+            setLLMStage("transcription");
             mic_status_box.style.boxShadow = "0 0 3px 3px lightgreen";
             clearTimeout(speechTimer);
           },
@@ -516,6 +571,7 @@
             lastSpeechEndTime = Date.now();
             speechTimer = setTimeout(() => {
               if (Date.now() - lastSpeechEndTime >= 3000) {
+                setLLMStage("translation");
                 system_status.innerText = "Translating...";
                 if (socket && socket.connected) {
                   socket.emit("translate");
@@ -547,11 +603,13 @@
         socket.on("translation", async (data) => {
           system_status.innerText = "Translation received";
           translation.value = data;
+          setLLMStage("llm_response");
           await processCommand(generated_image.alt, data);
         });
 
         socket.on("llm_response", async (data) => {
           system_status.innerText = "LLM response received";
+          setLLMStage("done");
           llm_response.value = data;
         });
 
@@ -597,13 +655,16 @@
           }
         });
 
-        generated_image.addEventListener("click", () => {
-          updateGallery();
-          main_page.style.display = "none";
-          gallery.style.display = "flex";
-          panzoom_parent.style.display = "none";
-          body.style.overflow = "auto";
-          body.style.cursor = "default";
+        generated_image.removeEventListener("click", () => {
+          showGallery();
+        });
+
+        gallery_button.addEventListener("click", () => {
+          showGallery();
+        });
+
+        chart_button.addEventListener("click", () => {
+          showTreeView(generated_image.alt);
         });
       }
       main();
@@ -630,6 +691,7 @@
         backendProcessing = false;
         shouldClearTranscription = true;
         updateMicStatusStyle();
+        setLLMStage("reset");
       }
 
       function updateMicStatusStyle() {
@@ -684,12 +746,7 @@
                 img.src = `/images/${image.name}`;
                 img.alt = image.name;
                 img.addEventListener("click", () => {
-                  main_page.style.display = "none";
-                  gallery.style.display = "none";
-                  panzoom_parent.style.display = "flex";
-                  body.style.overflow = "hidden";
-                  body.style.cursor = "move";
-                  generateTreeView(image.name);
+                  showMainPage(image.name);
                 });
 
                 const overlay = document.createElement("div");
@@ -705,6 +762,35 @@
             });
           })
           .catch((error) => console.error("Error fetching images:", error));
+      }
+
+      function showMainPage(image_name) {
+        main_page.style.display = "flex";
+        gallery.style.display = "none";
+        panzoom_parent.style.display = "none";
+        image_name = image_name.split("?")[0];
+        generated_image.src = `/images/${image_name}`;
+        generated_image.alt = image_name;
+        body.style.overflow = "auto";
+        body.style.cursor = "default";
+      }
+
+      function showGallery() {
+        updateGallery();
+        main_page.style.display = "none";
+        gallery.style.display = "flex";
+        panzoom_parent.style.display = "none";
+        body.style.overflow = "auto";
+        body.style.cursor = "default";
+      }
+
+      function showTreeView(image_name) {
+        main_page.style.display = "none";
+        gallery.style.display = "none";
+        panzoom_parent.style.display = "flex";
+        body.style.overflow = "hidden";
+        body.style.cursor = "move";
+        generateTreeView(image_name);
       }
 
       async function generateTreeView(image_name) {
@@ -779,13 +865,7 @@
         const images = document.querySelectorAll(".node img");
         images.forEach((img) => {
           img.addEventListener("click", () => {
-            main_page.style.display = "flex";
-            gallery.style.display = "none";
-            panzoom_parent.style.display = "none";
-            generated_image.src = img.src;
-            generated_image.alt = img.src.split("/images/")[1];
-            body.style.overflow = "auto";
-            body.style.cursor = "default";
+            showMainPage(img.src.split("/images/")[1]);
           });
         });
         const screenSize = {
@@ -801,6 +881,55 @@
           (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
           (screenSize.h - elemHei * initalZoom) / 2
         );
+      }
+
+      function setLLMStage(stage) {
+        if (stage == "transcription") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
+          transcription.style.borderColor = "yellow";
+          transcription.style.borderWidth = "2px";
+          translation.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+          llm_response.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+        } else if (stage == "translation") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "yellow"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
+          transcription.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+          translation.style.borderColor = "yellow";
+          transcription.style.borderWidth = "2px";
+          llm_response.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+        } else if (stage == "llm_response") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "yellow"));
+          transcription.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+          translation.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+          llm_response.style.borderColor = "yellow";
+          transcription.style.borderWidth = "2px";
+        } else if (stage == "done") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          transcription.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+          translation.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+          llm_response.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+        } else {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
+          transcription.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+          translation.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+          llm_response.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+        }
       }
     </script>
   </body>
