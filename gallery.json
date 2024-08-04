@@ -438,5 +438,490 @@
         "name": "Add-sun-to-the-SyFsas",
         "prompt": "Add sun to the sky",
         "parent": "Replace-the-city-with-zhEphv"
+    },
+    {
+        "name": "a-person-playing-a-UWYvMA",
+        "prompt": "a person playing a computer with you",
+        "parent": null
+    },
+    {
+        "name": "change-the-color-of-CKVNMq",
+        "prompt": "change the color of the person's shirt to blue",
+        "parent": "a-person-playing-a-UWYvMA"
+    },
+    {
+        "name": "five-birds-flying-in-gEsTeA",
+        "prompt": "five birds flying in the sky",
+        "parent": null
+    },
+    {
+        "name": "remove-the-clouds-from-VXJTIK",
+        "prompt": "remove the clouds from the image",
+        "parent": "five-birds-flying-in-gEsTeA"
+    },
+    {
+        "name": "Change-the-weather-to-LeEwKY",
+        "prompt": "Change the weather to rain",
+        "parent": "remove-the-clouds-from-VXJTIK"
+    },
+    {
+        "name": "a-man-riding-a-SyCTAc",
+        "prompt": "a man riding a bicycle",
+        "parent": null
+    },
+    {
+        "name": "make-water-flow-from-ZCmqmi",
+        "prompt": "make water flow from a specific point in the image",
+        "parent": "a-man-riding-a-SyCTAc"
+    },
+    {
+        "name": "More-snowfall-video-footage-PucgAU",
+        "prompt": "More snowfall video footage",
+        "parent": "a-man-riding-a-SyCTAc"
+    },
+    {
+        "name": "a-rocket-launch-scene-QltDMZ",
+        "prompt": "a rocket launch scene",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-from-yHSPJT",
+        "prompt": "Generating a video from the provided image",
+        "parent": "a-rocket-launch-scene-QltDMZ"
+    },
+    {
+        "name": "a-rally-car-driving-dDbMBo",
+        "prompt": "a rally car driving in Finland",
+        "parent": null
+    },
+    {
+        "name": "make-it-winter-weather-WJGTPi",
+        "prompt": "make it winter weather",
+        "parent": "a-rally-car-driving-dDbMBo"
+    },
+    {
+        "name": "a-man-driving-a-xBEKez",
+        "prompt": "a man driving a bicycle",
+        "parent": null
+    },
+    {
+        "name": "a-man-sitting-at-rQuwKi",
+        "prompt": "a man sitting at a desk working on a computer",
+        "parent": null
+    },
+    {
+        "name": "A-blank-canvas-for-dLtdwU",
+        "prompt": "A blank canvas for the new image.",
+        "parent": null
+    },
+    {
+        "name": "Add-a-person-to-GpACog",
+        "prompt": "Add a person to the image",
+        "parent": "A-blank-canvas-for-dLtdwU"
+    },
+    {
+        "name": "Add-a-card-to-pDHXpR",
+        "prompt": "Add a card to the image of a player",
+        "parent": "Add-a-person-to-GpACog"
+    },
+    {
+        "name": "add-a-car-gDIPil",
+        "prompt": "add a car",
+        "parent": "Add-a-card-to-pDHXpR"
+    },
+    {
+        "name": "an-image-of-the-zOzjkl",
+        "prompt": "an image of the AFL Tower",
+        "parent": null
+    },
+    {
+        "name": "add-fireworks-to-the-mZyRMu",
+        "prompt": "add fireworks to the sky",
+        "parent": "an-image-of-the-zOzjkl"
+    },
+    {
+        "name": "make-it-summer-RenhXN",
+        "prompt": "make it summer",
+        "parent": "an-image-of-the-zOzjkl"
+    },
+    {
+        "name": "Make-it-appear-as-jvToOq",
+        "prompt": "Make it appear as if it's winter time",
+        "parent": "make-it-summer-RenhXN"
+    },
+    {
+        "name": "a-man-walking-in-UdalLH",
+        "prompt": "a man walking in the middle of a road in Finland",
+        "parent": null
+    },
+    {
+        "name": "change-the-scene-to-OrLCRr",
+        "prompt": "change the scene to winter",
+        "parent": "a-man-walking-in-UdalLH"
+    },
+    {
+        "name": "Increase-the-brightness-and-IjrEKm",
+        "prompt": "Increase the brightness and add more sun to the sky",
+        "parent": "change-the-scene-to-OrLCRr"
+    },
+    {
+        "name": "Generating-a-video-from-TFtenr",
+        "prompt": "Generating a video from the current image",
+        "parent": "Increase-the-brightness-and-IjrEKm"
+    },
+    {
+        "name": "fireworks-aHPYxX",
+        "prompt": "fireworks",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-from-BWHlvz",
+        "prompt": "Generating a video from the current image",
+        "parent": "fireworks-aHPYxX"
+    },
+    {
+        "name": "a-close-up-image-of-IPeGaj",
+        "prompt": "a close-up image of LPS coral in an aquarium",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-UPbKiT",
+        "prompt": "Generating a video",
+        "parent": "a-close-up-image-of-IPeGaj"
+    },
+    {
+        "name": "a-Serasque-in-an-woaOSg",
+        "prompt": "a Serasque in an alabaster setting",
+        "parent": null
+    },
+    {
+        "name": "a-totem-pole-with-KiXowE",
+        "prompt": "a totem pole with various animals",
+        "parent": null
+    },
+    {
+        "name": "a-Bengal-Cat-byTaOR",
+        "prompt": "a Bengal Cat",
+        "parent": null
+    },
+    {
+        "name": "a-full-body-shot-wWcAdx",
+        "prompt": "a full body shot of Bengal Cat, Nevi Moke",
+        "parent": null
+    },
+    {
+        "name": "Add-a-hat-to-nfTahn",
+        "prompt": "Add a hat to the cat",
+        "parent": "a-full-body-shot-wWcAdx"
+    },
+    {
+        "name": "Make-the-cat-wear-Ovpduq",
+        "prompt": "Make the cat wear clothes",
+        "parent": "Add-a-hat-to-nfTahn"
+    },
+    {
+        "name": "Replace-the-current-background-sBPiZs",
+        "prompt": "Replace the current background with a skinnery of a lake",
+        "parent": "Make-the-cat-wear-Ovpduq"
+    },
+    {
+        "name": "Replace-the-current-background-kBwggA",
+        "prompt": "Replace the current background with a scenery of a lake.",
+        "parent": "a-full-body-shot-wWcAdx"
+    },
+    {
+        "name": "Replace-the-wall-behind-yGBZmP",
+        "prompt": "Replace the wall behind the cat with a scenery of a lake.",
+        "parent": "a-full-body-shot-wWcAdx"
+    },
+    {
+        "name": "Convert-the-current-image-fpCrlK",
+        "prompt": "Convert the current image into a 3D model",
+        "parent": "a-man-walking-on-ayNhyp"
+    },
+    {
+        "name": "Convert-this-image-into-HxplRi",
+        "prompt": "Convert this image into a 3D model",
+        "parent": "a-Bengal-Cat-byTaOR"
+    },
+    {
+        "name": "a-woman-in-a-rXSMDA",
+        "prompt": "a woman in a flower garden",
+        "parent": null
+    },
+    {
+        "name": "a-grocery-store-interior-RjKNCb",
+        "prompt": "a grocery store interior",
+        "parent": null
+    },
+    {
+        "name": "a-picture-of-the-Ewgami",
+        "prompt": "a picture of the Eiffel Tower",
+        "parent": null
+    },
+    {
+        "name": "Move-the-image-within-phJVjE",
+        "prompt": "Move the image within a mask",
+        "parent": "a-picture-of-the-Ewgami"
+    },
+    {
+        "name": "Move-the-image-to-ktWItB",
+        "prompt": "Move the image to Mars environment",
+        "parent": "a-picture-of-the-Ewgami"
+    },
+    {
+        "name": "make-it-snow-GTjyeY",
+        "prompt": "make it snow",
+        "parent": "a-picture-of-the-Ewgami"
+    },
+    {
+        "name": "Add-fireworks-to-the-DagPoX",
+        "prompt": "Add fireworks to the sky",
+        "parent": "make-it-snow-GTjyeY"
+    },
+    {
+        "name": "make-midnight-time-MPiXKF",
+        "prompt": "make midnight time",
+        "parent": "Add-fireworks-to-the-DagPoX"
+    },
+    {
+        "name": "change-the-time-of-SUaiQq",
+        "prompt": "change the time of day to midnight",
+        "parent": "make-it-snow-GTjyeY"
+    },
+    {
+        "name": "Add-fireworks-to-the-GHfhJY",
+        "prompt": "Add fireworks to the sky",
+        "parent": "change-the-time-of-SUaiQq"
+    },
+    {
+        "name": "Generating-a-video-from-pdHccT",
+        "prompt": "Generating a video from the current image",
+        "parent": "Add-fireworks-to-the-GHfhJY"
+    },
+    {
+        "name": "a-person-(you)-from-oejRXp",
+        "prompt": "a person (you) from the artificial intelligence agency",
+        "parent": null
+    },
+    {
+        "name": "Give-the-image-a-mtPlNJ",
+        "prompt": "Give the image a sketch-like appearance, as if it's being drawn",
+        "parent": "a-person-(you)-from-oejRXp"
+    },
+    {
+        "name": "a-rainy-scene-in-vemfIy",
+        "prompt": "a rainy scene in Finland",
+        "parent": null
+    },
+    {
+        "name": "Add-a-sailboat-(sautubene)-Fvlgll",
+        "prompt": "Add a sailboat (sautubene) to the lake",
+        "parent": "a-rainy-scene-in-vemfIy"
+    },
+    {
+        "name": "Add-lightning-to-the-zZnDyI",
+        "prompt": "Add lightning to the sky",
+        "parent": "Add-a-sailboat-(sautubene)-Fvlgll"
+    },
+    {
+        "name": "a-man-hunting-with-YtXpsd",
+        "prompt": "a man hunting with a spring gun and he has a pet bear",
+        "parent": null
+    },
+    {
+        "name": "Add-a-hat-to-pIrWvY",
+        "prompt": "Add a hat to the bear's head",
+        "parent": "a-man-hunting-with-YtXpsd"
+    },
+    {
+        "name": "Change-the-season-to-tCdAWm",
+        "prompt": "Change the season to winter",
+        "parent": "a-man-hunting-with-YtXpsd"
+    },
+    {
+        "name": "Change-the-forest-landscape-ULlHtw",
+        "prompt": "Change the forest landscape to a lake landscape",
+        "parent": "a-man-hunting-with-YtXpsd"
+    },
+    {
+        "name": "a-forest-scene-yETOTa",
+        "prompt": "a forest scene",
+        "parent": null
+    },
+    {
+        "name": "add-a-hobbit-ZNZaWl",
+        "prompt": "add a hobbit",
+        "parent": "a-forest-scene-yETOTa"
+    },
+    {
+        "name": "Add-a-bear-TvNrnV",
+        "prompt": "Add a bear",
+        "parent": "a-forest-scene-yETOTa"
+    },
+    {
+        "name": "a-man-fixing-a-KeXEpV",
+        "prompt": "a man fixing a computer",
+        "parent": null
+    },
+    {
+        "name": "Make-the-man-wear-TXRwAP",
+        "prompt": "Make the man wear a hat",
+        "parent": "a-man-fixing-a-KeXEpV"
+    },
+    {
+        "name": "Make-the-man-bald.-IAparG",
+        "prompt": "Make the man bald.",
+        "parent": "Make-the-man-wear-TXRwAP"
+    },
+    {
+        "name": "Replace-the-computer-with-gGUjxH",
+        "prompt": "Replace the computer with an Apple MacBook",
+        "parent": "Make-the-man-bald.-IAparG"
+    },
+    {
+        "name": "Change-the-man-to-FvGTlY",
+        "prompt": "Change the man to be fixing a printer instead of a computer",
+        "parent": "Replace-the-computer-with-gGUjxH"
+    },
+    {
+        "name": "a-rocket-launch-Ohgmwm",
+        "prompt": "a rocket launch",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-from-ABDqFT",
+        "prompt": "Generating a video from the current image",
+        "parent": "a-rocket-launch-Ohgmwm"
+    },
+    {
+        "name": "a-volcano-erupting-InekXx",
+        "prompt": "a volcano erupting",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-from-bOfiug",
+        "prompt": "Generating a video from the current image",
+        "parent": "a-volcano-erupting-InekXx"
+    },
+    {
+        "name": "fireworks-in-the-sky-YMwCBg",
+        "prompt": "fireworks in the sky celebrating New Year in China",
+        "parent": null
+    },
+    {
+        "name": "Generating-a-video-from-LSpucK",
+        "prompt": "Generating a video from the given image",
+        "parent": "fireworks-in-the-sky-YMwCBg"
+    },
+    {
+        "name": "a-person-(you)-on-BwRmqo",
+        "prompt": "a person (you) on the beach",
+        "parent": null
+    },
+    {
+        "name": "Add-clouds-to-the-Hnrfng",
+        "prompt": "Add clouds to the sky",
+        "parent": "a-person-(you)-on-BwRmqo"
+    },
+    {
+        "name": "A-scene-set-in-jFRDJy",
+        "prompt": "A scene set in Salomaa Sammakossa",
+        "parent": null
+    },
+    {
+        "name": "a-stylized-image-depicting-wFlhsp",
+        "prompt": "a stylized image depicting a scene reminiscent of the Minecraft game",
+        "parent": null
+    },
+    {
+        "name": "make-the-image-resemble-PhQBOe",
+        "prompt": "make the image resemble a Minecraft-style",
+        "parent": "A-scene-set-in-jFRDJy"
+    },
+    {
+        "name": "a-scenery-of-a-PWYNIN",
+        "prompt": "a scenery of a lake with a fence in the back",
+        "parent": null
+    },
+    {
+        "name": "a-lake-surrounded-by-aKHNKo",
+        "prompt": "a lake surrounded by mountains in the background",
+        "parent": null
+    },
+    {
+        "name": "Add-boats-to-the-rsJbAh",
+        "prompt": "Add boats to the lake",
+        "parent": "a-lake-surrounded-by-aKHNKo"
+    },
+    {
+        "name": "Add-a-large-boat-LtHKCQ",
+        "prompt": "Add a large boat on water",
+        "parent": "Add-boats-to-the-rsJbAh"
+    },
+    {
+        "name": "Replace-the-mountains-in-ygXvUF",
+        "prompt": "Replace the mountains in the background with a city skyline",
+        "parent": "Add-a-large-boat-LtHKCQ"
+    },
+    {
+        "name": "a-picture-of-a-RVHjIO",
+        "prompt": "a picture of a beach",
+        "parent": null
+    },
+    {
+        "name": "a-sea,-lake-in-pbNwfK",
+        "prompt": "a sea, lake in the middle of a forest",
+        "parent": null
+    },
+    {
+        "name": "a-comparison-between-a-qemuUv",
+        "prompt": "a comparison between a boat and a crook",
+        "parent": null
+    },
+    {
+        "name": "Add-a-ship-to-WRAtzY",
+        "prompt": "Add a ship to the water.",
+        "parent": "a-sea,-lake-in-pbNwfK"
+    },
+    {
+        "name": "Make-it-midday-uspbxN",
+        "prompt": "Make it midday",
+        "parent": "Add-a-ship-to-WRAtzY"
+    },
+    {
+        "name": "A-bird-flying-in-lTHZVj",
+        "prompt": "A bird flying in the sky",
+        "parent": "Make-it-midday-uspbxN"
+    },
+    {
+        "name": "style-the-image-to-XZiaID",
+        "prompt": "style the image to resemble Minecraft graphics",
+        "parent": "Make-it-midday-uspbxN"
+    },
+    {
+        "name": "a-beautiful-scenic-image-MRQSqF",
+        "prompt": "a beautiful scenic image",
+        "parent": null
+    },
+    {
+        "name": "a-lot-of-fish-rArRWx",
+        "prompt": "a lot of fish",
+        "parent": null
+    },
+    {
+        "name": "Add-water-and-a-rLcODX",
+        "prompt": "Add water and a rope to the image",
+        "parent": "a-beautiful-scenic-image-MRQSqF"
+    },
+    {
+        "name": "Add-a-genuinely-secondary-tulzpK",
+        "prompt": "Add a genuinely secondary notification sign",
+        "parent": "Add-water-and-a-rLcODX"
+    },
+    {
+        "name": "Add-water-anchors-to-XNUJSb",
+        "prompt": "Add water anchors to the image",
+        "parent": "Add-a-genuinely-secondary-tulzpK"
     }
 ]

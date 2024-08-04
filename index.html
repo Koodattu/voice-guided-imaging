@@ -41,7 +41,36 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        height: 100vh;
+        height: 100%;
+        width: 75vw;
+      }
+
+      #spinner_container {
+        position: absolute;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.25);
+      }
+
+      .spinner {
+        border: 16px solid #f3f3f3;
+        border-radius: 50%;
+        border-top: 16px solid #3498db;
+        width: 120px;
+        height: 120px;
+        animation: spin 2s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
       }
 
       h1 {
@@ -141,11 +170,12 @@
         display: flex;
         align-items: center;
         position: relative;
+        width: 100%;
       }
 
       #generated_image {
         object-fit: contain;
-        height: calc(100vh - 515px);
+        height: calc(100vh - 500px);
         width: auto;
         flex-grow: 1;
         border-radius: 8px;
@@ -229,7 +259,7 @@
         border: 0.5vmin solid black;
         border-radius: 100%;
         width: 300px;
-        height: 150px;
+        height: 175px;
         left: 75px;
         bottom: 225px;
         display: flex;
@@ -240,6 +270,8 @@
         background: #ffd;
         box-shadow: 0 -0.25vmin, 0 0.125vmin;
         font-family: "Comic Sans", "Comic Neue", sans-serif;
+        opacity: 1;
+        transition: all 0.5s ease-in-out;
       }
 
       .bubble::before {
@@ -344,6 +376,13 @@
         height: 100%;
       }
 
+      .gallery_chart_button div {
+        width: 50%;
+        height: 50%;
+        align-items: center;
+        justify-content: center;
+      }
+
       .gallery_chart_button {
         position: relative;
         width: 50%;
@@ -352,19 +391,19 @@
         background: transparent;
         border-radius: 8px;
         cursor: pointer;
-        opacity: 0;
-        background: gray;
+        opacity: 0.25;
         color: white;
-        font-size: 4.5rem;
+        font-size: 2.5rem;
         font-weight: bold;
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         align-items: center;
         justify-content: center;
       }
 
       .gallery_chart_button:hover {
         opacity: 0.75;
+        background: rgba(255, 255, 255, 0.25);
       }
 
       .gallery_chart_button img {
@@ -383,7 +422,7 @@
         class="logo-image"
         src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gpt-lab-sjk-v2.png"
       />
-      <div class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
+      <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
       <img
         class="jr-image"
         src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png"
@@ -466,15 +505,24 @@
         <img id="generated_image" src="https://mkantwerpen.be/wp-content/uploads/2020/01/placeholder.png" />
         <div class="gen-image-buttons">
           <button id="chart_button" class="gallery_chart_button">
-            CHART
-            <img
-              src="https://www.simplilearn.com/ice9/free_resources_article_thumb/Trees-in-csharp/Trees-in-CSharp-Types-BST-img1.png"
-            />
+            <div>
+              <p>CHART</p>
+              <img
+                src="https://www.simplilearn.com/ice9/free_resources_article_thumb/Trees-in-csharp/Trees-in-CSharp-Types-BST-img1.png"
+              />
+            </div>
+            <div></div>
           </button>
           <button id="gallery_button" class="gallery_chart_button">
-            GALLERY
-            <img src="https://cdn3.iconfinder.com/data/icons/faticons/32/grid-2-01-512.png" />
+            <div></div>
+            <div>
+              <p>GALLERY</p>
+              <img src="https://cdn3.iconfinder.com/data/icons/faticons/32/grid-2-01-512.png" />
+            </div>
           </button>
+        </div>
+        <div id="spinner_container">
+          <div id="spinner" class="spinner"></div>
         </div>
       </div>
     </div>
@@ -508,6 +556,8 @@
       const llm_response = document.getElementById("llm_response");
       const toggleRecording = document.getElementById("toggleRecording");
       const generated_image = document.getElementById("generated_image");
+      const spinner = document.getElementById("spinner_container");
+      const speech_bubble = document.getElementById("speech_bubble");
 
       const mic_status_box = document.getElementById("mic_status_box");
       const system_status = document.getElementById("system_status");
@@ -577,6 +627,7 @@
                   socket.emit("translate");
                 }
                 backendProcessing = true;
+                spinner.style.display = "flex";
                 updateMicStatusStyle();
               }
             }, 3000);
@@ -610,6 +661,7 @@
         socket.on("llm_response", async (data) => {
           system_status.innerText = "LLM response received";
           setLLMStage("done");
+          processJussiRasku(data);
           llm_response.value = data;
         });
 
@@ -683,15 +735,20 @@
         const json = await response.json();
         if (json.error) {
           system_status.innerText = "Error: " + json.error;
+          processJussiRasku("error:");
         } else {
           generated_image.src = `/images/${json.image}`;
           generated_image.alt = json.image;
           system_status.innerText = "Done! Waiting for input...";
+          if (!json.action || json.action !== "undo") {
+            processJussiRasku("done:");
+          }
         }
         backendProcessing = false;
         shouldClearTranscription = true;
         updateMicStatusStyle();
         setLLMStage("reset");
+        spinner.style.display = "none";
       }
 
       function updateMicStatusStyle() {
@@ -897,40 +954,179 @@
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "yellow"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
           transcription.style.borderColor = "lightgreen";
-          transcription.style.borderWidth = "1px";
           translation.style.borderColor = "yellow";
-          transcription.style.borderWidth = "2px";
           llm_response.style.borderColor = "white";
-          transcription.style.borderWidth = "1px";
         } else if (stage == "llm_response") {
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "yellow"));
           transcription.style.borderColor = "lightgreen";
-          transcription.style.borderWidth = "1px";
           translation.style.borderColor = "lightgreen";
-          transcription.style.borderWidth = "1px";
           llm_response.style.borderColor = "yellow";
-          transcription.style.borderWidth = "2px";
         } else if (stage == "done") {
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
           transcription.style.borderColor = "lightgreen";
-          transcription.style.borderWidth = "1px";
           translation.style.borderColor = "lightgreen";
-          transcription.style.borderWidth = "1px";
           llm_response.style.borderColor = "lightgreen";
-          transcription.style.borderWidth = "1px";
         } else {
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
           transcription.style.borderColor = "white";
-          transcription.style.borderWidth = "1px";
           translation.style.borderColor = "white";
-          transcription.style.borderWidth = "1px";
           llm_response.style.borderColor = "white";
-          transcription.style.borderWidth = "1px";
         }
       }
+
+      let timer = null;
+
+      const createOrEditReminderReplies = [
+        "Koita vaikka sanoa notta 'tees mulle uus kuva tekoälyagentista'",
+        "Uuteen kuvaan? Sano vaikka 'luo kuva merenrannasta'",
+        "Kuvaidea hukassa? Koita vaikka 'uusi kuva Suomen metsästä'?",
+        "Mitä jos kuvassa olisikin talvi? Sano vaikka 'muokkaa kuvaa talviseksi'",
+        "Muokkausidea? 'muokkaa kuvaan tähtitaivas'",
+        "Mites vaikka, 'mitä jos kuvassa olisi yö'?",
+        "Tämäkin on mahdollista: 'tee tästä kuvasta video'",
+        "Tätä et pakosti arvannut: 'tees kuvasta video'",
+        "Ei tullu mieluista? Sano että 'mennään edelliseen kuvaan'",
+        "Jos et ole tyytyväinen, voit sanoa 'perutaan tämä muutos'",
+      ];
+
+      function processJussiRasku(data) {
+        const createReplies = [
+          "Pistetään kuvaa tulille, ei kestä kauaa!",
+          "Kuvaa väsätään, älä hättäile!",
+          "Uutta kuvaa pukkaa, pysy linjoilla!",
+          "Luodaan mestariteosta, älä hermostu!",
+          "Uutta kuvaa syntyy, malta mieles!",
+          "Viritellään kuvaa, hetki vain!",
+          "Kohta se o valmis, pysy kyydissä!",
+          "Kuva on kohta näpissä, malta hetki!",
+          "Luodaan kuvaa, kestää vähän!",
+          "Kuvanteko käynnissä, odotahan pieni hetki!",
+        ];
+
+        const editReplies = [
+          "Muokataan kuvaa, toivotaan parasta!",
+          "Kuvaa muokataan, kärsivällisyyttä!",
+          "Kuvan viilaus menossa, malta hetki!",
+          "Parannellaan kuvaa, kohta valmista!",
+          "Muokataan kuvaa, pysy rauhassa!",
+          "Uusiks pistetään kuvaa, hetki vaan!",
+          "Kuvaa viilataan, oota hetki!",
+          "Kuvan editointi käynnissä, hetki vaan!",
+          "Muokataan kuvaa, malttia!",
+          "Viilataan kuvaa, oota hetki!",
+        ];
+
+        const videoReplies = [
+          "Videota tehhään, hetki menee!",
+          "Videon käsittelyssä, kärsivällisyyttä!",
+          "Videota työstetään, pysy rauhallisena!",
+          "Videon luominen käynnissä, odota!",
+          "Videota tehtäessä, odotahan!",
+          "Pistetään video käyntiin, hetki vaan!",
+          "Videon teko aloitettu, malta hetki!",
+          "Videota syntyy, pysy linjoilla!",
+          "Videota luodaan, oota pieni hetki!",
+          "Video työn alla, malta hetki!",
+        ];
+
+        const undoReplies = [
+          "Eipä tainnu mennä ihan putkeen!",
+          "Joskus käy näin, uudestaan vaan!",
+          "Ei osunu nappiin? Ei hätää!",
+          "Ei tullut toivottua tulosta?",
+          "Aina ei onnistu, mutta yrittänyttä ei laiteta!",
+          "Ei menny niinku Strömssössä...",
+          "Pieni virhe voi olla suuri löytö!",
+          "Ei oo epäonnistumisia, on vaan oppeja!",
+          "Epäonnistuminen on askel eteenpäin!",
+          "Ei virheitä, vain iloisia vahinkoja!",
+        ];
+
+        const errorReplies = [
+          "Jotain meni pieleen, yritä uusiks!",
+          "Virhe tapahtu, kokeilepa uudelleen!",
+          "Hups, vikaan meni, yritä uusiks!",
+          "Jokin meni pieleen, koetahan uudelleen!",
+          "Virhe havaittu, yritä uusiks!",
+          "Tapahtu virhe, koita uudelleen!",
+          "Ei menny putkeen, yritä uusiks!",
+          "Virhetilanne, yritäpä uusiks!",
+          "Jokin meni vikaan, koita uudelleen!",
+          "Hupsista, kokeile uusiks!",
+        ];
+
+        const doneReplies = [
+          "Tälläänen siitä tuli, mitä tykkäät? Ei oo koira karvoistansa!",
+          "Kuva valmis, onko hyvä? Meirän tekemä!",
+          "Valmista tuli, maistuuko? Pannaan paremmaksi ens kerralla!",
+          "Kuva on valmis, mitäs sanot? Parempi pyy pivossa ku kymmenen oksalla!",
+          "Tässä on lopputulos, miltä näyttää? Ei mikään harakanvarvas!",
+          "Valmis kuva, kelpaako? Ei hassumpi, vaikka itte sanon!",
+          "Lopputulos tässä, mitä tuumit? Parempi ku naapurin koira!",
+          "Nyt tuli nätti, eikös vain? Käy ku nenä päähän!",
+          "Tässä valmis kuva, mitäs tykkäät? Eikä mennyt ku Strömssöössä!",
+          "Kuva valmis, mikä fiilis? Meikä mankeli tekase!",
+        ];
+
+        let newText = "Nyt en ihan ymmärtänyt, yritä uudestaan!";
+
+        if (data.startsWith("create:")) {
+          newText = createReplies[Math.floor(Math.random() * createReplies.length)];
+        } else if (data.startsWith("edit:")) {
+          newText = editReplies[Math.floor(Math.random() * editReplies.length)];
+        } else if (data.startsWith("video:")) {
+          newText = videoReplies[Math.floor(Math.random() * videoReplies.length)];
+        } else if (data.startsWith("undo:")) {
+          newText = undoReplies[Math.floor(Math.random() * undoReplies.length)];
+        } else if (data.startsWith("error:")) {
+          newText = errorReplies[Math.floor(Math.random() * errorReplies.length)];
+        } else if (data.startsWith("done:")) {
+          newText = doneReplies[Math.floor(Math.random() * doneReplies.length)];
+        }
+
+        if (timer) {
+          clearTimeout(timer);
+        }
+
+        function startTimer() {
+          timer = setTimeout(() => {
+            newText = createOrEditReminderReplies[Math.floor(Math.random() * createOrEditReminderReplies.length)];
+            changeBubbleText(newText);
+            startTimer();
+          }, 30000);
+        }
+
+        startTimer();
+
+        changeBubbleText(newText);
+      }
+
+      function changeBubbleText(newText) {
+        // Fade out and move up
+        speech_bubble.style.opacity = "0";
+        speech_bubble.style.transform = "translate(0, -60%)";
+
+        // After the fade out and move up is complete, change the text and reset position
+        setTimeout(() => {
+          // or textContent? instead of innerText
+          speech_bubble.innerText = newText;
+          speech_bubble.style.transition = "none"; // Temporarily disable transition for instant position reset
+          speech_bubble.style.transform = "translate(0, 60%)"; // Move to the bottom
+          speech_bubble.style.opacity = "0"; // Keep it invisible
+          // Trigger reflow to apply styles immediately
+          void speech_bubble.offsetHeight;
+
+          // Fade in and move to original position
+          speech_bubble.style.transition = "all 0.5s ease-in-out";
+          speech_bubble.style.transform = "translate(0, 0)";
+          speech_bubble.style.opacity = "1";
+        }, 500); // Wait for the fade out animation to complete
+      }
+
+      processJussiRasku("init:");
     </script>
   </body>
 </html>

@@ -204,7 +204,7 @@ def generate_image(prompt):
 def edit_image(parent_image, prompt):
     print(f"Editing image with prompt: {prompt}")
     image = get_saved_image(parent_image)
-    #image = image.resize((768, 768))
+    image = image.resize((768, 768))
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
@@ -214,7 +214,7 @@ def edit_image(parent_image, prompt):
     ).images[0]
     unload_model(pix2pix)
     print("Edited image!")
-    #image = image.resize((1024, 1024))
+    image = image.resize((1024, 1024))
     image = save_image(image, prompt, parent=parent_image)
     return jsonify({"image": image, "prompt": prompt})
 
@@ -227,7 +227,7 @@ def previous_image(image):
         if obj["name"] == image_file:
             prompt = obj["prompt"]
             break
-    return jsonify({"image": image_file, "prompt": prompt})
+    return jsonify({"image": image_file, "prompt": prompt, "action": "undo"})
 
 def mp4_to_webp(mp4_path, webp_path, fps):
     clip = VideoFileClip(mp4_path)
