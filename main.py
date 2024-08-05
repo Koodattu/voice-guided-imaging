@@ -54,11 +54,19 @@ print("SDXL-Lightning model loaded successfully!")
 audio_segments = []
 transcription_language = None
 
+def try_catch(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        socketio.emit("error", f"error: {e}")
+
+
 # https://huggingface.co/ByteDance/SDXL-Lightning
 def load_sdxl_lightning():
     base = "stabilityai/stable-diffusion-xl-base-1.0"
     repo = "ByteDance/SDXL-Lightning"
-    ckpt = "sdxl_lightning_2step_unet.safetensors"
+    ckpt = "sdxl_lightning_4step_unet.safetensors"
     unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
     unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
     unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
@@ -116,6 +124,9 @@ def handle_lang_select(data):
 @socketio.on("audio_data")
 def handle_audio_data(data):
     print("Transcribing audio data...")
+    try_catch(process_transcription, data)
+
+def process_transcription(data):
     decode = base64.b64decode(data)
     segment = AudioSegment.from_file(io.BytesIO(decode), format="wav")
     audio_segments.append(segment)
@@ -130,6 +141,9 @@ def handle_audio_data(data):
 @socketio.on("translate")
 def handle_translation():
     print("Translating audio...")
+    try_catch(process_translation)
+
+def process_translation():
     save_concatenated_audio()
     result = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language, fp16=True)
     print(f"Translation: {result['text']}")
@@ -141,7 +155,7 @@ def process_command():
     command = data.get("command")
     image = data.get("image")
     print(f"Processing command: {command}")
-    return llm_process_command(image, command)
+    return try_catch(llm_process_command, image, command)
 
 def llm_process_command(image, command):
     result = llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", command))
@@ -162,8 +176,8 @@ def llm_process_command(image, command):
     if action == "undo":
         socketio.emit("status", "Reverting to previous image...")
         return previous_image(image)
-    if action == "error":
-        return jsonify({"error": prompt})
+    if action == "unknown":
+        return jsonify({"unknown": prompt})
 
 def progress(pipe, step: int, timestep: int, callback_kwargs):
     socketio.emit("status", f"Generating, Step {step+1}")
@@ -204,17 +218,19 @@ def generate_image(prompt):
 def edit_image(parent_image, prompt):
     print(f"Editing image with prompt: {prompt}")
     image = get_saved_image(parent_image)
-    image = image.resize((768, 768))
+    image = image.resize((512, 512), Image.Resampling.LANCZOS)
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
         image=image,
+        guidance_scale=8,
+        image_guidance_scale=1,
         num_inference_steps=10,
         callback_on_step_end=progress
     ).images[0]
     unload_model(pix2pix)
     print("Edited image!")
-    image = image.resize((1024, 1024))
+    image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
     image = save_image(image, prompt, parent=parent_image)
     return jsonify({"image": image, "prompt": prompt})
 
@@ -239,7 +255,7 @@ def mp4_to_webp(mp4_path, webp_path, fps):
     frames = []
     for frame in looping_clip.iter_frames(fps=fps):
         img = Image.fromarray(frame)
-        img = img.resize((1024, 1024))
+        img = img.resize((1024, 1024), Image.Resampling.LANCZOS)
         frames.append(img)
 
     # Save frames as a looping WebP animation
@@ -254,7 +270,7 @@ def mp4_to_webp(mp4_path, webp_path, fps):
 def generate_video_from_image(parent_image, prompt):
     print("Generating video from image...")
     image = get_saved_image(parent_image)
-    image = image.resize((1024, 576))
+    image = image.resize((1024, 576), Image.Resampling.LANCZOS)
     img2vid = load_video_diffusion()
     frames = img2vid(
         image, 
@@ -325,7 +341,7 @@ def save_image(image, prompt, parent=None):
         os.makedirs("./gallery/thumbnails")
     image_name = random_image_name(prompt)
     image.save(f"./gallery/{image_name}.webp")
-    image = image.resize((256, 256))
+    image = image.resize((256, 256), Image.Resampling.LANCZOS)
     image.save(f"./gallery/thumbnails/{image_name}.webp")
     add_to_json_file(image_name, prompt, parent)
     return image_name
@@ -349,10 +365,6 @@ def add_to_json_file(name, prompt, parent):
 @app.route("/")
 def index():
     return render_template("index.html")
-
-@app.route("/gallery")
-def gallery():
-    return render_template("gallery.html")
 
 if __name__ == "__main__":
     print("Server started, ready to go!")

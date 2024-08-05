@@ -42,7 +42,7 @@
         flex-direction: column;
         align-items: center;
         height: 100%;
-        width: 75vw;
+        width: 70vw;
       }
 
       #spinner_container {
@@ -234,7 +234,7 @@
         position: absolute;
         right: 0;
         bottom: 0;
-        width: 150px;
+        height: 300px;
         margin: 10px;
         opacity: 1;
       }
@@ -258,7 +258,7 @@
         color: black;
         border: 0.5vmin solid black;
         border-radius: 100%;
-        width: 300px;
+        width: 275px;
         height: 175px;
         left: 75px;
         bottom: 225px;
@@ -376,11 +376,12 @@
         height: 100%;
       }
 
-      .gallery_chart_button div {
-        width: 50%;
-        height: 50%;
-        align-items: center;
-        justify-content: center;
+      .gallery_chart_button .text_image_div {
+        width: 45%;
+      }
+
+      .gallery_chart_button .spacer_div {
+        width: 55%;
       }
 
       .gallery_chart_button {
@@ -505,17 +506,17 @@
         <img id="generated_image" src="https://mkantwerpen.be/wp-content/uploads/2020/01/placeholder.png" />
         <div class="gen-image-buttons">
           <button id="chart_button" class="gallery_chart_button">
-            <div>
+            <div class="text_image_div">
               <p>CHART</p>
               <img
                 src="https://www.simplilearn.com/ice9/free_resources_article_thumb/Trees-in-csharp/Trees-in-CSharp-Types-BST-img1.png"
               />
             </div>
-            <div></div>
+            <div class="spacer_div"></div>
           </button>
           <button id="gallery_button" class="gallery_chart_button">
-            <div></div>
-            <div>
+            <div class="spacer_div"></div>
+            <div class="text_image_div">
               <p>GALLERY</p>
               <img src="https://cdn3.iconfinder.com/data/icons/faticons/32/grid-2-01-512.png" />
             </div>
@@ -580,6 +581,15 @@
 
       toggleRecording.addEventListener("change", () => {
         recordingEnabled = toggleRecording.checked;
+        if (recordingEnabled) {
+          if (myvad) {
+            myvad.start();
+          }
+        } else {
+          if (myvad) {
+            myvad.stop();
+          }
+        }
         updateMicStatusStyle();
       });
 
@@ -592,7 +602,7 @@
           preSpeechPadFrames: 5,
           redemptionFrames: 3,
           onSpeechStart: () => {
-            if (!recordingEnabled || backendProcessing) {
+            if (backendProcessing) {
               return;
             }
             if (shouldClearTranscription) {
@@ -607,7 +617,7 @@
             clearTimeout(speechTimer);
           },
           onSpeechEnd: (audio) => {
-            if (!recordingEnabled || backendProcessing) {
+            if (backendProcessing) {
               return;
             }
             console.log("Speech end");
@@ -633,7 +643,6 @@
             }, 3000);
           },
         });
-        myvad.start();
       }
 
       async function main() {
@@ -668,6 +677,12 @@
         socket.on("status", (data) => {
           console.log("Status: " + data);
           system_status.innerText = data;
+        });
+
+        socket.on("error", (data) => {
+          console.log("Error: " + data);
+          system_status.innerText = data;
+          processJussiRasku("error:");
         });
 
         socket.on("image_progress", (data) => {
@@ -733,9 +748,9 @@
           body: JSON.stringify({ image, command }),
         });
         const json = await response.json();
-        if (json.error) {
-          system_status.innerText = "Error: " + json.error;
-          processJussiRasku("error:");
+        if (json.unknown) {
+          system_status.innerText = "Unknown: " + json.unknown;
+          processJussiRasku("unknown:");
         } else {
           generated_image.src = `/images/${json.image}`;
           generated_image.alt = json.image;
@@ -1125,8 +1140,6 @@
           speech_bubble.style.opacity = "1";
         }, 500); // Wait for the fade out animation to complete
       }
-
-      processJussiRasku("init:");
     </script>
   </body>
 </html>

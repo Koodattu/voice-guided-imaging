@@ -923,5 +923,125 @@
         "name": "Add-water-anchors-to-XNUJSb",
         "prompt": "Add water anchors to the image",
         "parent": "Add-a-genuinely-secondary-tulzpK"
+    },
+    {
+        "name": "a-lake-view-with-NKjpjb",
+        "prompt": "a lake view with mountains in the background",
+        "parent": null
+    },
+    {
+        "name": "paintings-of-landscapes-with-WslrGL",
+        "prompt": "paintings of landscapes with cities covering the mountains in the background",
+        "parent": null
+    },
+    {
+        "name": "a-distant-landscape-of-wQeNFf",
+        "prompt": "a distant landscape of a city",
+        "parent": null
+    },
+    {
+        "name": "a-lake-view-with-ETFuCX",
+        "prompt": "a lake view with a mountain in the background",
+        "parent": null
+    },
+    {
+        "name": "Add-boats-to-the-iJpkfz",
+        "prompt": "Add boats to the water at the end of the video",
+        "parent": "a-lake-view-with-ETFuCX"
+    },
+    {
+        "name": "Add-multiple-ships-to-aPCGGe",
+        "prompt": "Add multiple ships to the lake",
+        "parent": "Add-boats-to-the-iJpkfz"
+    },
+    {
+        "name": "Add-a-star-to-oGLApr",
+        "prompt": "Add a star to the image",
+        "parent": "Add-multiple-ships-to-aPCGGe"
+    },
+    {
+        "name": "Add-a-starry-sky-SBKUbo",
+        "prompt": "Add a starry sky to the current image.",
+        "parent": "Add-a-star-to-oGLApr"
+    },
+    {
+        "name": "a-Shiba-Inu-dog-uBThvn",
+        "prompt": "a Shiba Inu dog",
+        "parent": null
+    },
+    {
+        "name": "Change-the-color-of-FtjwDI",
+        "prompt": "Change the color of the dog to red",
+        "parent": "a-Shiba-Inu-dog-uBThvn"
+    },
+    {
+        "name": "add-a-hat-on-zfKkLv",
+        "prompt": "add a hat on the top of the dog's head",
+        "parent": "Change-the-color-of-FtjwDI"
+    },
+    {
+        "name": "Make-the-dog-look-lPbpbD",
+        "prompt": "Make the dog look like a Minecraft-style character",
+        "parent": "add-a-hat-on-zfKkLv"
+    },
+    {
+        "name": "a-city-skyline-during-fZPHXV",
+        "prompt": "a city skyline during the day with skyscrapers and a river",
+        "parent": null
+    },
+    {
+        "name": "Change-the-time-to-VKsUtS",
+        "prompt": "Change the time to night and have city lights illuminate the buildings",
+        "parent": "a-city-skyline-during-fZPHXV"
+    },
+    {
+        "name": "add-fireworks-to-the-eFWRyk",
+        "prompt": "add fireworks to the sky",
+        "parent": "Change-the-time-to-VKsUtS"
+    },
+    {
+        "name": "Insert-a-large-bridge-DuvcAx",
+        "prompt": "Insert a large bridge across the river",
+        "parent": "add-fireworks-to-the-eFWRyk"
+    },
+    {
+        "name": "Insert-a-large-bridge-NYDWhx",
+        "prompt": "Insert a large bridge crossing the river",
+        "parent": "a-city-skyline-during-fZPHXV"
+    },
+    {
+        "name": "Replace-one-of-the-IPTxBM",
+        "prompt": "Replace one of the buildings with a futuristic skyscraper",
+        "parent": "Insert-a-large-bridge-NYDWhx"
+    },
+    {
+        "name": "a-sunny-beach-with-apbbiZ",
+        "prompt": "a sunny beach with waves, sand and a few beachgoers",
+        "parent": null
+    },
+    {
+        "name": "Add-a-sandcastle-near-SFNLLh",
+        "prompt": "Add a sandcastle near the water",
+        "parent": "a-sunny-beach-with-apbbiZ"
+    },
+    {
+        "name": "Place-a-sailboat-on-dZUonA",
+        "prompt": "Place a sailboat on the horizon",
+        "parent": "Add-a-sandcastle-near-SFNLLh"
+    },
+    {
+        "name": "Change-the-sky-to-okHpsH",
+        "prompt": "Change the sky to a dramatic thunderstorm.",
+        "parent": "Add-a-sandcastle-near-SFNLLh"
+    },
+    {
+        "name": "Insert-a-lifeguard-tower-AIZyIE",
+        "prompt": "Insert a lifeguard tower in the background",
+        "parent": "Change-the-sky-to-okHpsH"
+    },
+    {
+        "name": "Add-a-beautiful-sunset-pILhkJ",
+        "prompt": "Add a beautiful sunset to the image",
+        "parent": "a-city-skyline-during-fZPHXV"
     }
 ]
