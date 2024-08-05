@@ -1043,5 +1043,90 @@
         "name": "Add-a-beautiful-sunset-pILhkJ",
         "prompt": "Add a beautiful sunset to the image",
         "parent": "a-city-skyline-during-fZPHXV"
+    },
+    {
+        "name": "a-beautiful-girl-vdoPEc",
+        "prompt": "a beautiful girl",
+        "parent": null
+    },
+    {
+        "name": "Change-the-woman's-face-fMwlMg",
+        "prompt": "Change the woman's face to Asmugold's face",
+        "parent": "a-beautiful-girl-vdoPEc"
+    },
+    {
+        "name": "Add-more-details-to-mLgtLz",
+        "prompt": "Add more details to the woman in the picture, resembling Kaula",
+        "parent": "a-beautiful-girl-vdoPEc"
+    },
+    {
+        "name": "Add-a-necklace-to-tnkmZV",
+        "prompt": "Add a necklace to the woman's neck",
+        "parent": "a-beautiful-girl-vdoPEc"
+    },
+    {
+        "name": "a-new-image-of-wtgqcX",
+        "prompt": "a new image of Mona Lisa",
+        "parent": null
+    },
+    {
+        "name": "Make-her-wear-sunglasses-JveeDg",
+        "prompt": "Make her wear sunglasses",
+        "parent": "a-new-image-of-wtgqcX"
+    },
+    {
+        "name": "make-hair-bald-SEjmST",
+        "prompt": "make hair bald",
+        "parent": "Make-her-wear-sunglasses-JveeDg"
+    },
+    {
+        "name": "a-green-grass-field-RUckxs",
+        "prompt": "a green grass field and a blue sky with clouds",
+        "parent": null
+    },
+    {
+        "name": "Insert-a-train-VOFckz",
+        "prompt": "Insert a train",
+        "parent": "a-green-grass-field-RUckxs"
+    },
+    {
+        "name": "Add-a-thunderstorm-nvvIpr",
+        "prompt": "Add a thunderstorm",
+        "parent": "Insert-a-train-VOFckz"
+    },
+    {
+        "name": "Convert-the-image-to-yXcukP",
+        "prompt": "Convert the image to an oil pastel drawing",
+        "parent": "Add-a-thunderstorm-nvvIpr"
+    },
+    {
+        "name": "Give-it-a-dark-xAGlYu",
+        "prompt": "Give it a dark and creepy atmosphere",
+        "parent": "Add-a-thunderstorm-nvvIpr"
+    },
+    {
+        "name": "a-man-and-a-mInZbS",
+        "prompt": "a man and a woman posing as old-time farmers",
+        "parent": null
+    },
+    {
+        "name": "Change-the-appearance-to-nueYVp",
+        "prompt": "Change the appearance to make them look like flight attendants",
+        "parent": "a-man-and-a-mInZbS"
+    },
+    {
+        "name": "Change-characters-to-resemble-jADcUQ",
+        "prompt": "Change characters to resemble doctors",
+        "parent": "a-man-and-a-mInZbS"
+    },
+    {
+        "name": "Change-their-appearance-to-pncjEs",
+        "prompt": "Change their appearance to that of flight attendants",
+        "parent": "a-man-and-a-mInZbS"
+    },
+    {
+        "name": "Make-the-subjects-in-QxmNMk",
+        "prompt": "Make the subjects in the image look like flight attendants.",
+        "parent": "Change-their-appearance-to-pncjEs"
     }
 ]

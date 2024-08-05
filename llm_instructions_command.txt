@@ -28,11 +28,56 @@ Response: { "action":"edit", "prompt":"add car" }
 User Input: "remove chair from the image"
 Response: { "action":"edit", "prompt":"remove the chair" }
 
+User Input: "edit the image so the mountains in the back are replaced with a city skyline"
+Response: { "action":"edit", "prompt":"replace the mountains with a city skyline" }
+
+User Input: "add boats to the lake in the image"
+Response: { "action":"edit", "prompt":"add boats on the water" }
+
+User Input: "it is now night"
+Response: { "action":"edit", "prompt":"it is now night" }
+
 User Input: "time of day night"
 Response: { "action":"edit", "prompt":"make night time" }
 
 User Input: "add fireworks to the sky in the image"
 Response: { "action":"edit", "prompt":"add fireworks to the sky" }
+
+User Input: "edit the image and make them look like flight attendants"
+Response: { "action":"edit", "prompt":"make them look like flight attendants" }
+
+User Input: "make them look like doctors"
+Response: { "action":"edit", "prompt":"make them look like doctors" }
+
+User Input: "make her wear sunglasses"
+Response: { "action":"edit", "prompt":"put on a pair of sunglasses"
+
+User Input: "add a train into the image"
+Response: { "action":"edit", "prompt":"insert a train"
+
+User Input: "add a bridge over the river"
+Response: { "action":"edit", "prompt":"insert a bridge over the river"
+
+User Input: "move them to space"
+Response: { "action":"edit", "prompt":"put them in outer space" }
+
+User Input: "make it look like its realistic"
+Response: { "action":"edit", "prompt":"convert to a realistic photo" }
+
+User Input: "make it 3d"
+Response: { "action":"edit", "prompt":"turn into a 3d model" }
+
+User Input: "in a race car video game"
+Response: { "action":"edit", "prompt":"in a race car video game" }
+
+User Input: "swap the sunflowers in the image with roses"
+Response: { "action":"edit", "prompt":"swap sunflowers with roses" }
+
+User Input: "what would it look like if it was a western movie"
+Response: { "action":"edit", "prompt":"turn it into a still from a western" }
+
+User Input: "make the image look like an oil pastel drawing"
+Response: { "action":"edit", "prompt":"turn into an oil pastel drawing" }
 
 User Input: "change the image so that the man is a woman"
 Response: { "action":"edit", "prompt":"change the man into a woman" }

@@ -78,7 +78,7 @@ def load_sdxl_lightning():
 
 # https://huggingface.co/timbrooks/instruct-pix2pix
 def load_instruct_pix2pix():
-    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained("timbrooks/instruct-pix2pix", torch_dtype=torch.float16, cache_dir=cache_dir)
+    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained("timbrooks/instruct-pix2pix", torch_dtype=torch.float16, cache_dir=cache_dir, safety_checker=None)
     pix2pix.to("cuda")
     pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
     pix2pix.enable_model_cpu_offload()
@@ -223,8 +223,6 @@ def edit_image(parent_image, prompt):
     image = pix2pix(
         prompt=prompt,
         image=image,
-        guidance_scale=8,
-        image_guidance_scale=1,
         num_inference_steps=10,
         callback_on_step_end=progress
     ).images[0]
@@ -236,13 +234,22 @@ def edit_image(parent_image, prompt):
 
 def previous_image(image):
     print("Going to previous image")
-    image_file = get_previous_image("./gallery", image + ".webp")
-    image_file = image_file.replace(".webp", "")
     gallery_json = json.load(open("gallery.json", "r"))
+    for obj in gallery_json:
+        if obj["name"] == image:
+            prompt = obj["prompt"]
+            parent = obj["parent"]
+            break
+    
+    if parent:
+        return jsonify({"image": parent, "prompt": prompt, "action": "undo"})
+    
+    image_file = get_previous_image("./gallery", image + ".webp")
     for obj in gallery_json:
         if obj["name"] == image_file:
             prompt = obj["prompt"]
             break
+    image_file = image_file.replace(".webp", "")
     return jsonify({"image": image_file, "prompt": prompt, "action": "undo"})
 
 def mp4_to_webp(mp4_path, webp_path, fps):

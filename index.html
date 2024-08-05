@@ -683,6 +683,11 @@
           console.log("Error: " + data);
           system_status.innerText = data;
           processJussiRasku("error:");
+          backendProcessing = false;
+          shouldClearTranscription = true;
+          updateMicStatusStyle();
+          setLLMStage("reset");
+          spinner.style.display = "none";
         });
 
         socket.on("image_progress", (data) => {
