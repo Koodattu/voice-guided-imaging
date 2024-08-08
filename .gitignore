@@ -166,3 +166,4 @@ cython_debug/
 *.wav
 *.webp
 *.mp4
+/_old_backup

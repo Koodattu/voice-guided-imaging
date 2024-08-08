@@ -42,7 +42,7 @@
         flex-direction: column;
         align-items: center;
         height: 100%;
-        width: 70vw;
+        width: calc(100% - 725px);
       }
 
       #spinner_container {
@@ -139,7 +139,7 @@
         pointer-events: none;
         font-family: "Exo", sans-serif;
         width: 300px;
-        height: 100px;
+        height: 75px;
       }
 
       .arrow {
@@ -169,15 +169,15 @@
       .gen-image-container {
         display: flex;
         align-items: center;
+        justify-content: center;
         position: relative;
         width: 100%;
       }
 
       #generated_image {
         object-fit: contain;
-        height: calc(100vh - 500px);
+        height: calc(100vh - 425px);
         width: auto;
-        flex-grow: 1;
         border-radius: 8px;
       }
 
@@ -534,6 +534,7 @@
       <div class="tree-view" id="tree_view"></div>
     </div>
 
+    <script src="responses.js"></script>
     <script>
       const body = document.getElementById("body");
       const main_page = document.getElementById("main_page");
@@ -578,6 +579,7 @@
       let lastSpeechEndTime = 0;
       let myvad = null;
       let socket = null;
+      let language = "en";
 
       toggleRecording.addEventListener("change", () => {
         recordingEnabled = toggleRecording.checked;
@@ -587,7 +589,7 @@
           }
         } else {
           if (myvad) {
-            myvad.stop();
+            myvad.pause();
           }
         }
         updateMicStatusStyle();
@@ -613,7 +615,7 @@
             }
             console.log("Speech start");
             setLLMStage("transcription");
-            mic_status_box.style.boxShadow = "0 0 3px 3px lightgreen";
+            mic_status_box.style.boxShadow = "0 0 5px 5px lightgreen";
             clearTimeout(speechTimer);
           },
           onSpeechEnd: (audio) => {
@@ -647,7 +649,7 @@
 
       async function main() {
         updateMicStatusStyle();
-        socket = io("http://localhost:5001");
+        socket = io();
 
         socket.on("connect", () => {
           console.log("Connected to server");
@@ -712,18 +714,24 @@
         rb_auto.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "");
+            changeBubbleText("Using Auto Language Detection");
+            language = "en";
           }
         });
 
         rb_en.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "en");
+            changeBubbleText("Now in English!");
+            language = "en";
           }
         });
 
         rb_fi.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "fi");
+            changeBubbleText("Puhumme Suomea!");
+            language = "fi";
           }
         });
 
@@ -937,27 +945,27 @@
           nodeStructure: nodeStructure,
         };
 
-        const my_chart = new Treant(simple_chart_config);
-
-        const images = document.querySelectorAll(".node img");
-        images.forEach((img) => {
-          img.addEventListener("click", () => {
-            showMainPage(img.src.split("/images/")[1]);
+        const my_chart = new Treant(simple_chart_config, function () {
+          const images = document.querySelectorAll(".node img");
+          images.forEach((img) => {
+            img.addEventListener("click", () => {
+              showMainPage(img.src.split("/images/")[1]);
+            });
           });
+          const screenSize = {
+            w: Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
+            h: Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
+          };
+          const elemWid = tree_view.offsetWidth;
+          const elemHei = tree_view.offsetHeight;
+          let initalZoom =
+            screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
+          panzoom_element.zoomAbs(0, 0, initalZoom * 0.9);
+          panzoom_element.moveTo(
+            (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
+            (screenSize.h - elemHei * initalZoom) / 2
+          );
         });
-        const screenSize = {
-          w: Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
-          h: Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
-        };
-        const elemWid = tree_view.offsetWidth;
-        const elemHei = tree_view.offsetHeight;
-        let initalZoom =
-          screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
-        panzoom_element.zoomAbs(0, 0, initalZoom * 0.9);
-        panzoom_element.moveTo(
-          (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
-          (screenSize.h - elemHei * initalZoom) / 2
-        );
       }
 
       function setLLMStage(stage) {
@@ -999,112 +1007,25 @@
 
       let timer = null;
 
-      const createOrEditReminderReplies = [
-        "Koita vaikka sanoa notta 'tees mulle uus kuva tekoälyagentista'",
-        "Uuteen kuvaan? Sano vaikka 'luo kuva merenrannasta'",
-        "Kuvaidea hukassa? Koita vaikka 'uusi kuva Suomen metsästä'?",
-        "Mitä jos kuvassa olisikin talvi? Sano vaikka 'muokkaa kuvaa talviseksi'",
-        "Muokkausidea? 'muokkaa kuvaan tähtitaivas'",
-        "Mites vaikka, 'mitä jos kuvassa olisi yö'?",
-        "Tämäkin on mahdollista: 'tee tästä kuvasta video'",
-        "Tätä et pakosti arvannut: 'tees kuvasta video'",
-        "Ei tullu mieluista? Sano että 'mennään edelliseen kuvaan'",
-        "Jos et ole tyytyväinen, voit sanoa 'perutaan tämä muutos'",
-      ];
-
       function processJussiRasku(data) {
-        const createReplies = [
-          "Pistetään kuvaa tulille, ei kestä kauaa!",
-          "Kuvaa väsätään, älä hättäile!",
-          "Uutta kuvaa pukkaa, pysy linjoilla!",
-          "Luodaan mestariteosta, älä hermostu!",
-          "Uutta kuvaa syntyy, malta mieles!",
-          "Viritellään kuvaa, hetki vain!",
-          "Kohta se o valmis, pysy kyydissä!",
-          "Kuva on kohta näpissä, malta hetki!",
-          "Luodaan kuvaa, kestää vähän!",
-          "Kuvanteko käynnissä, odotahan pieni hetki!",
-        ];
-
-        const editReplies = [
-          "Muokataan kuvaa, toivotaan parasta!",
-          "Kuvaa muokataan, kärsivällisyyttä!",
-          "Kuvan viilaus menossa, malta hetki!",
-          "Parannellaan kuvaa, kohta valmista!",
-          "Muokataan kuvaa, pysy rauhassa!",
-          "Uusiks pistetään kuvaa, hetki vaan!",
-          "Kuvaa viilataan, oota hetki!",
-          "Kuvan editointi käynnissä, hetki vaan!",
-          "Muokataan kuvaa, malttia!",
-          "Viilataan kuvaa, oota hetki!",
-        ];
-
-        const videoReplies = [
-          "Videota tehhään, hetki menee!",
-          "Videon käsittelyssä, kärsivällisyyttä!",
-          "Videota työstetään, pysy rauhallisena!",
-          "Videon luominen käynnissä, odota!",
-          "Videota tehtäessä, odotahan!",
-          "Pistetään video käyntiin, hetki vaan!",
-          "Videon teko aloitettu, malta hetki!",
-          "Videota syntyy, pysy linjoilla!",
-          "Videota luodaan, oota pieni hetki!",
-          "Video työn alla, malta hetki!",
-        ];
-
-        const undoReplies = [
-          "Eipä tainnu mennä ihan putkeen!",
-          "Joskus käy näin, uudestaan vaan!",
-          "Ei osunu nappiin? Ei hätää!",
-          "Ei tullut toivottua tulosta?",
-          "Aina ei onnistu, mutta yrittänyttä ei laiteta!",
-          "Ei menny niinku Strömssössä...",
-          "Pieni virhe voi olla suuri löytö!",
-          "Ei oo epäonnistumisia, on vaan oppeja!",
-          "Epäonnistuminen on askel eteenpäin!",
-          "Ei virheitä, vain iloisia vahinkoja!",
-        ];
-
-        const errorReplies = [
-          "Jotain meni pieleen, yritä uusiks!",
-          "Virhe tapahtu, kokeilepa uudelleen!",
-          "Hups, vikaan meni, yritä uusiks!",
-          "Jokin meni pieleen, koetahan uudelleen!",
-          "Virhe havaittu, yritä uusiks!",
-          "Tapahtu virhe, koita uudelleen!",
-          "Ei menny putkeen, yritä uusiks!",
-          "Virhetilanne, yritäpä uusiks!",
-          "Jokin meni vikaan, koita uudelleen!",
-          "Hupsista, kokeile uusiks!",
-        ];
-
-        const doneReplies = [
-          "Tälläänen siitä tuli, mitä tykkäät? Ei oo koira karvoistansa!",
-          "Kuva valmis, onko hyvä? Meirän tekemä!",
-          "Valmista tuli, maistuuko? Pannaan paremmaksi ens kerralla!",
-          "Kuva on valmis, mitäs sanot? Parempi pyy pivossa ku kymmenen oksalla!",
-          "Tässä on lopputulos, miltä näyttää? Ei mikään harakanvarvas!",
-          "Valmis kuva, kelpaako? Ei hassumpi, vaikka itte sanon!",
-          "Lopputulos tässä, mitä tuumit? Parempi ku naapurin koira!",
-          "Nyt tuli nätti, eikös vain? Käy ku nenä päähän!",
-          "Tässä valmis kuva, mitäs tykkäät? Eikä mennyt ku Strömssöössä!",
-          "Kuva valmis, mikä fiilis? Meikä mankeli tekase!",
-        ];
-
-        let newText = "Nyt en ihan ymmärtänyt, yritä uudestaan!";
+        let newText =
+          language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
 
         if (data.startsWith("create:")) {
-          newText = createReplies[Math.floor(Math.random() * createReplies.length)];
+          newText =
+            responses[language].createReplies[Math.floor(Math.random() * responses[language].createReplies.length)];
         } else if (data.startsWith("edit:")) {
-          newText = editReplies[Math.floor(Math.random() * editReplies.length)];
+          newText = responses[language].editReplies[Math.floor(Math.random() * responses[language].editReplies.length)];
         } else if (data.startsWith("video:")) {
-          newText = videoReplies[Math.floor(Math.random() * videoReplies.length)];
+          newText =
+            responses[language].videoReplies[Math.floor(Math.random() * responses[language].videoReplies.length)];
         } else if (data.startsWith("undo:")) {
-          newText = undoReplies[Math.floor(Math.random() * undoReplies.length)];
+          newText = responses[language].undoReplies[Math.floor(Math.random() * responses[language].undoReplies.length)];
         } else if (data.startsWith("error:")) {
-          newText = errorReplies[Math.floor(Math.random() * errorReplies.length)];
+          newText =
+            responses[language].errorReplies[Math.floor(Math.random() * responses[language].errorReplies.length)];
         } else if (data.startsWith("done:")) {
-          newText = doneReplies[Math.floor(Math.random() * doneReplies.length)];
+          newText = responses[language].doneReplies[Math.floor(Math.random() * responses[language].doneReplies.length)];
         }
 
         if (timer) {
@@ -1113,7 +1034,10 @@
 
         function startTimer() {
           timer = setTimeout(() => {
-            newText = createOrEditReminderReplies[Math.floor(Math.random() * createOrEditReminderReplies.length)];
+            newText =
+              responses[language].createOrEditReminderReplies[
+                Math.floor(Math.random() * responses[language].createOrEditReminderReplies.length)
+              ];
             changeBubbleText(newText);
             startTimer();
           }, 30000);

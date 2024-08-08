@@ -40,7 +40,7 @@ print("WHISPER model loaded successfully!")
 print("Loading SDXL-Lightning model...")
 base = "stabilityai/stable-diffusion-xl-base-1.0"
 repo = "ByteDance/SDXL-Lightning"
-ckpt = "sdxl_lightning_4step_unet.safetensors"
+ckpt = "sdxl_lightning_2step_unet.safetensors"
 unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
 unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
 unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
@@ -48,6 +48,7 @@ txt2img = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype
 txt2img.to("cuda")
 txt2img.scheduler = EulerDiscreteScheduler.from_config(txt2img.scheduler.config, timestep_spacing="trailing")
 txt2img.enable_model_cpu_offload()
+txt2img.enable_vae_slicing()
 print("SDXL-Lightning model loaded successfully!")
 
 # Holder for whole recording
@@ -74,6 +75,7 @@ def load_sdxl_lightning():
     txt2img.to("cuda")
     txt2img.scheduler = EulerDiscreteScheduler.from_config(txt2img.scheduler.config, timestep_spacing="trailing")
     txt2img.enable_model_cpu_offload()
+    txt2img.enable_vae_slicing()
     return txt2img
 
 # https://huggingface.co/timbrooks/instruct-pix2pix
@@ -82,6 +84,7 @@ def load_instruct_pix2pix():
     pix2pix.to("cuda")
     pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
     pix2pix.enable_model_cpu_offload()
+    pix2pix.enable_vae_slicing()
     return pix2pix
 
 # https://huggingface.co/diffusers/sdxl-instructpix2pix-768
@@ -208,7 +211,7 @@ def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
     image = txt2img(
         prompt,
-        num_inference_steps=4, 
+        num_inference_steps=2, 
         guidance_scale=0,
         callback_on_step_end=progress
     ).images[0]
@@ -223,7 +226,7 @@ def edit_image(parent_image, prompt):
     image = pix2pix(
         prompt=prompt,
         image=image,
-        num_inference_steps=10,
+        num_inference_steps=50,
         callback_on_step_end=progress
     ).images[0]
     unload_model(pix2pix)
