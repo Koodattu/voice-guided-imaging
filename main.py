@@ -128,7 +128,7 @@ def handle_lang_select(data):
 
 @socketio.on("full_audio_data")
 def handle_audio_data(data):
-    print("Transcribing audio data...")
+    print("Transcribing full audio data...")
     try_catch(process_full_audio, data)
 
 def process_full_audio(data):
@@ -136,17 +136,18 @@ def process_full_audio(data):
     with open(f"full_audio.webm", "wb") as f:
         f.write(decode)
         f.close()
+    audio = AudioSegment.from_file("full_audio.webm")
+    if len(audio) < 2000:
+        emit("empty_transcription", "No audio detected, please try again.")
+        emit("status", "Waiting...")
+        return
     with lock:
         result = whisper_model.transcribe("full_audio.webm", task="transcribe", language=transcription_language, fp16=True)
-    print(f"Transcription: {result['text']}")
-    if result["text"] == "":
-        emit("empty_transcription", "No audio detected, please try again.")
-        emit("status", "No audio detected, please try again.")
-        return
+    print(f"Full transcription: {result['text']}")
     emit("full_transcription", result["text"])
     with lock:
         result = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language, fp16=True)
-    print(f"Translation: {result['text']}")
+    print(f"Full translation: {result['text']}")
     emit("translation", result["text"])
 
 @socketio.on("audio_data")
