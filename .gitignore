@@ -167,3 +167,5 @@ cython_debug/
 *.webp
 *.mp4
 /_old_backup
+gallery.json
+full_audio.webm

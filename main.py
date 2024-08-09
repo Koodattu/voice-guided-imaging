@@ -19,11 +19,13 @@ from langchain_community.chat_models import ChatOllama
 import json
 from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
 from flask_cors import CORS
-import pandas as pd
+from threading import Lock
 
 app = Flask(__name__, template_folder=".")
 CORS(app)
 socketio = SocketIO(app, async_mode="threading")
+
+lock = Lock()
 
 cache_dir = "./model_cache"
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -40,7 +42,7 @@ print("WHISPER model loaded successfully!")
 print("Loading SDXL-Lightning model...")
 base = "stabilityai/stable-diffusion-xl-base-1.0"
 repo = "ByteDance/SDXL-Lightning"
-ckpt = "sdxl_lightning_2step_unet.safetensors"
+ckpt = "sdxl_lightning_4step_unet.safetensors"
 unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
 unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
 unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
@@ -124,6 +126,29 @@ def handle_lang_select(data):
     transcription_language = None if data == "" else data
     emit("status", "Updated language selection!")
 
+@socketio.on("full_audio_data")
+def handle_audio_data(data):
+    print("Transcribing audio data...")
+    try_catch(process_full_audio, data)
+
+def process_full_audio(data):
+    decode = base64.b64decode(data)
+    with open(f"full_audio.webm", "wb") as f:
+        f.write(decode)
+        f.close()
+    with lock:
+        result = whisper_model.transcribe("full_audio.webm", task="transcribe", language=transcription_language, fp16=True)
+    print(f"Transcription: {result['text']}")
+    if result["text"] == "":
+        emit("empty_transcription", "No audio detected, please try again.")
+        emit("status", "No audio detected, please try again.")
+        return
+    emit("full_transcription", result["text"])
+    with lock:
+        result = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language, fp16=True)
+    print(f"Translation: {result['text']}")
+    emit("translation", result["text"])
+
 @socketio.on("audio_data")
 def handle_audio_data(data):
     print("Transcribing audio data...")
@@ -137,7 +162,9 @@ def process_transcription(data):
     with open(f"audio.wav", "wb") as f:
         f.write(decode)
         f.close()
-    result = whisper_model.transcribe("audio.wav", language=transcription_language, fp16=True)
+
+    with lock:
+        result = whisper_model.transcribe("audio.wav", language=transcription_language, fp16=True)
     print(f"Transcription: {result['text']}")
     emit("transcription", result["text"])
 
@@ -148,7 +175,8 @@ def handle_translation():
 
 def process_translation():
     save_concatenated_audio()
-    result = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language, fp16=True)
+    with lock:
+        result = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language, fp16=True)
     print(f"Translation: {result['text']}")
     emit("translation", result["text"])
 
@@ -211,7 +239,7 @@ def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
     image = txt2img(
         prompt,
-        num_inference_steps=2, 
+        num_inference_steps=4,
         guidance_scale=0,
         callback_on_step_end=progress
     ).images[0]
@@ -226,7 +254,7 @@ def edit_image(parent_image, prompt):
     image = pix2pix(
         prompt=prompt,
         image=image,
-        num_inference_steps=50,
+        num_inference_steps=20,
         callback_on_step_end=progress
     ).images[0]
     unload_model(pix2pix)

@@ -110,7 +110,6 @@
       .flex-horizontal {
         display: flex;
         align-items: center;
-        flex-direction: row;
       }
 
       .flex-vertical {
@@ -154,7 +153,7 @@
         padding: 20px;
         align-items: center;
         justify-content: space-evenly;
-        width: 700px;
+        width: 900px;
       }
 
       .textareas-container {
@@ -176,7 +175,7 @@
 
       #generated_image {
         object-fit: contain;
-        height: calc(100vh - 425px);
+        height: calc(100vh - 475px);
         width: auto;
         border-radius: 8px;
       }
@@ -189,7 +188,7 @@
       }
 
       .mic-status {
-        width: 100px;
+        width: 125px;
         color: lightcoral;
         border: 2px solid lightcoral;
         border-radius: 8px;
@@ -433,13 +432,28 @@
       <div class="controls-content">
         <div>
           <div class="flex-horizontal">
-            <h3>Recording:&nbsp;&nbsp;</h3>
+            <h3>Microphone:&nbsp;&nbsp;</h3>
             <div id="mic_status_box" class="mic-status">
-              <label> <input class="cb-input" type="checkbox" id="toggleRecording" />Enable</label>
               <div class="flex-horizontal">
                 <i id="mic_icon_closed" class="fa fa-microphone-slash mic-icon" style="display: block"></i>
                 <i id="mic_icon_open" class="fa fa-microphone mic-icon" style="display: none"></i>
-                <p id="mic_status_txt" class="font-bold">Disabled</p>
+                <p id="mic_status_txt" class="font-bold">Muted</p>
+              </div>
+              <label id="mic_help" style="margin: 4px">Hold spacebar</label>
+            </div>
+          </div>
+        </div>
+        <div class="input-container height-50">
+          <div class="flex-center">
+            <h3>Behaviour:&nbsp;</h3>
+            <div class="flex-vertical">
+              <div>
+                <input class="rb-input" type="radio" id="rb_ptt" name="rb_mode" checked="true" />
+                <label for="rb_ptt">Push-to-Talk</label>
+              </div>
+              <div>
+                <input class="rb-input" type="radio" id="rb_vad" name="rb_mode" />
+                <label for="rb_vad">Voice Activity</label>
               </div>
             </div>
           </div>
@@ -534,7 +548,6 @@
       <div class="tree-view" id="tree_view"></div>
     </div>
 
-    <script src="responses.js"></script>
     <script>
       const body = document.getElementById("body");
       const main_page = document.getElementById("main_page");
@@ -556,23 +569,29 @@
       const transcription = document.getElementById("transcription");
       const translation = document.getElementById("translation");
       const llm_response = document.getElementById("llm_response");
-      const toggleRecording = document.getElementById("toggleRecording");
+      transcription.value = "";
+      translation.value = "";
+      llm_response.value = "";
       const generated_image = document.getElementById("generated_image");
       const spinner = document.getElementById("spinner_container");
       const speech_bubble = document.getElementById("speech_bubble");
 
       const mic_status_box = document.getElementById("mic_status_box");
+      const mic_status_txt = document.getElementById("mic_status_txt");
+      const mic_help = document.getElementById("mic_help");
       const system_status = document.getElementById("system_status");
 
       const rb_auto = document.getElementById("rb_auto");
       const rb_en = document.getElementById("rb_en");
       const rb_fi = document.getElementById("rb_fi");
 
+      const rb_ptt = document.getElementById("rb_ptt");
+      const rb_vad = document.getElementById("rb_vad");
+
       const gallery_button = document.getElementById("gallery_button");
       const chart_button = document.getElementById("chart_button");
 
       let ignoreScroll = true;
-      let recordingEnabled = false;
       let backendProcessing = false;
       let shouldClearTranscription = false;
       let speechTimer;
@@ -580,56 +599,69 @@
       let myvad = null;
       let socket = null;
       let language = "en";
+      let isRecording = false;
+      let isSpacePressed = false;
+      let shouldTranslate = false;
+      let mediaRecorderPTT;
+      let chunksPTT = [];
 
-      toggleRecording.addEventListener("change", () => {
-        recordingEnabled = toggleRecording.checked;
-        if (recordingEnabled) {
-          if (myvad) {
-            myvad.start();
-          }
-        } else {
-          if (myvad) {
-            myvad.pause();
-          }
-        }
+      rb_ptt.addEventListener("change", () => {
+        isRecording = false;
+        myvad.pause();
+        mic_help.innerText = "Hold spacebar";
         updateMicStatusStyle();
       });
 
-      async function startMicVAD(stream) {
+      rb_vad.addEventListener("change", () => {
+        isRecording = true;
+        myvad.start();
+        mic_help.innerText = "Start speaking";
+        updateMicStatusStyle();
+      });
+
+      async function startMicVAD(mediaStream) {
+        console.log("Starting microphone with VAD");
         myvad = await vad.MicVAD.new({
-          stream,
+          mediaStream,
           positiveSpeechThreshold: 0.8,
-          negativeSpeechThreshold: 0.8 - 0.15,
+          negativeSpeechThreshold: 0.6,
           minSpeechFrames: 1,
           preSpeechPadFrames: 5,
           redemptionFrames: 3,
           onSpeechStart: () => {
-            if (backendProcessing) {
+            console.log("Speech start");
+            if (!isRecording || backendProcessing) {
               return;
             }
+            mic_status_box.style.boxShadow = "0 0 5px 5px lightgreen";
+            mic_status_txt.innerText = "Recording";
             if (shouldClearTranscription) {
               transcription.value = "";
               translation.value = "";
               llm_response.value = "";
               shouldClearTranscription = false;
             }
-            console.log("Speech start");
             setLLMStage("transcription");
-            mic_status_box.style.boxShadow = "0 0 5px 5px lightgreen";
             clearTimeout(speechTimer);
           },
           onSpeechEnd: (audio) => {
-            if (backendProcessing) {
+            console.log("Speech end");
+            if (!isRecording || backendProcessing) {
               return;
             }
-            console.log("Speech end");
             mic_status_box.style.boxShadow = "";
+            updateMicStatusStyle();
+            // In case the socket is disconnected, we don't want to send the audio data
             if (!socket || !socket.connected) {
               return;
             }
             const wavBuffer = vad.utils.encodeWAV(audio);
             const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
             socket.emit("audio_data", base64);
+            // If we are using push-to-talk, we need to manually trigger the translation
+            if (rb_ptt.checked) {
+              return;
+            }
             lastSpeechEndTime = Date.now();
             speechTimer = setTimeout(() => {
               if (Date.now() - lastSpeechEndTime >= 3000) {
@@ -647,7 +679,72 @@
         });
       }
 
-      async function main() {
+      async function startMicPTTandVAD() {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            autoGainControl: false,
+            noiseCancellation: false,
+          },
+          video: false,
+        });
+        await startMicVAD(mediaStream);
+
+        console.log("Starting microphone with PTT");
+        mediaRecorderPTT = new MediaRecorder(mediaStream);
+        mediaRecorderPTT.ondataavailable = function (e) {
+          chunksPTT.push(e.data);
+        };
+
+        mediaRecorderPTT.onstop = function (e) {
+          const blob = new Blob(chunksPTT, { type: "audio/webm" });
+          chunksPTT = [];
+          const reader = new FileReader();
+          reader.readAsArrayBuffer(blob);
+          reader.onloadend = function () {
+            const arrayBuffer = reader.result;
+            const base64 = vad.utils.arrayBufferToBase64(arrayBuffer);
+            socket.emit("full_audio_data", base64);
+          };
+        };
+
+        document.body.onkeydown = function (e) {
+          if (e.code === "Space" && rb_ptt.checked && !backendProcessing) {
+            console.log("Spacebar pressed");
+            e.preventDefault();
+            if (isSpacePressed) {
+              return;
+            }
+            isSpacePressed = true;
+            isRecording = true;
+            updateMicStatusStyle();
+            myvad.start();
+            mediaRecorderPTT.start();
+            if (shouldClearTranscription) {
+              transcription.value = "";
+              translation.value = "";
+              llm_response.value = "";
+              shouldClearTranscription = false;
+            }
+          }
+        };
+
+        document.body.onkeyup = function (e) {
+          if (e.code === "Space" && rb_ptt.checked && !backendProcessing) {
+            console.log("Spacebar released");
+            e.preventDefault();
+            isSpacePressed = false;
+            isRecording = false;
+            updateMicStatusStyle();
+            myvad.pause();
+            setTimeout(() => {
+              mediaRecorderPTT.stop();
+            }, 500);
+          }
+        };
+      }
+
+      document.addEventListener("DOMContentLoaded", (event) => {
         updateMicStatusStyle();
         socket = io();
 
@@ -656,8 +753,17 @@
           system_status.innerText = "Connected to server! Ready to go!";
         });
 
+        socket.on("empty_transcription", (data) => {
+          system_status.innerText = "Empty transcription received";
+          setLLMStage("reset");
+        });
+
+        socket.on("full_transcription", (data) => {
+          system_status.innerText = "Full transcription received";
+          transcription.value = data;
+        });
+
         socket.on("transcription", (data) => {
-          console.log(transcription.innerText);
           system_status.innerText = "Transcription received";
           transcription.value = (transcription.value + data).replace(".", " ").replace("  ", " ");
         });
@@ -701,16 +807,6 @@
           system_status.innerText = "Disconnected from server";
         });
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: false,
-            autoGainControl: false,
-            noiseCancellation: false,
-          },
-          video: false,
-        });
-        await startMicVAD(stream);
-
         rb_auto.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "");
@@ -746,8 +842,9 @@
         chart_button.addEventListener("click", () => {
           showTreeView(generated_image.alt);
         });
-      }
-      main();
+
+        startMicPTTandVAD();
+      });
 
       async function processCommand(image, command) {
         backendProcessing = true;
@@ -777,20 +874,20 @@
         updateMicStatusStyle();
         setLLMStage("reset");
         spinner.style.display = "none";
+        updateGallery();
       }
 
       function updateMicStatusStyle() {
-        const mic_status_txt = document.getElementById("mic_status_txt");
         const mic_icon_closed = document.getElementById("mic_icon_closed");
         const mic_icon_open = document.getElementById("mic_icon_open");
         let status = "Unknown";
         mic_status_box.style = "";
         if (backendProcessing) {
           status = "Processing";
-        } else if (recordingEnabled) {
+        } else if (isRecording) {
           status = "Listening";
         } else {
-          status = "Disabled";
+          status = "Muted";
         }
         mic_status_txt.innerText = status;
         if (status === "Listening") {
@@ -798,7 +895,7 @@
           mic_status_box.style.borderColor = "lightgreen";
           mic_icon_closed.style.display = "none";
           mic_icon_open.style.display = "block";
-        } else if (status === "Disabled") {
+        } else if (status === "Muted") {
           mic_status_box.style.color = "lightcoral";
           mic_status_box.style.borderColor = "lightcoral";
           mic_icon_closed.style.display = "block";
@@ -861,7 +958,6 @@
       }
 
       function showGallery() {
-        updateGallery();
         main_page.style.display = "none";
         gallery.style.display = "flex";
         panzoom_parent.style.display = "none";
@@ -872,6 +968,7 @@
       function showTreeView(image_name) {
         main_page.style.display = "none";
         gallery.style.display = "none";
+        panzoom_parent.style.opacity = 0;
         panzoom_parent.style.display = "flex";
         body.style.overflow = "hidden";
         body.style.cursor = "move";
@@ -965,6 +1062,7 @@
             (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
             (screenSize.h - elemHei * initalZoom) / 2
           );
+          panzoom_parent.style.opacity = 1;
         });
       }
 
@@ -1069,6 +1167,181 @@
           speech_bubble.style.opacity = "1";
         }, 500); // Wait for the fade out animation to complete
       }
+
+      const responses = {
+        en: {
+          createOrEditReminderReplies: [
+            "Try saying something like 'make me a new image of an AI agent'",
+            "New image? Say something like 'create an image of the seaside'",
+            "Need an image idea? Try saying 'new image of a Finnish forest'?",
+            "How about winter in the picture? Say 'edit the image to be wintery'",
+            "Edit idea? 'edit the image with a starry sky'",
+            "How about, 'what if it was night in the picture'?",
+            "This is also possible: 'make a video from this image'",
+            "You probably didn't guess this: 'make a video from the image'",
+            "Didn't like it? Say 'go back to the previous image'",
+            "If you're not satisfied, you can say 'let's cancel this change'",
+          ],
+          createReplies: [
+            "Creating an image, it won't take long!",
+            "Image is being created, don't worry!",
+            "A new image is coming, stay tuned!",
+            "Creating a masterpiece, don't get nervous!",
+            "A new image is coming up, be patient!",
+            "Setting up the image, just a moment!",
+            "It'll be ready soon, stay with us!",
+            "The image is almost done, hold on!",
+            "Creating an image, it will take a bit!",
+            "Image creation in progress, wait a moment!",
+          ],
+          editReplies: [
+            "Editing the image, hope for the best!",
+            "Image is being edited, patience!",
+            "Image tweaking in progress, hold on!",
+            "Improving the image, almost ready!",
+            "Editing the image, stay calm!",
+            "Reworking the image, just a moment!",
+            "Tweaking the image, wait a moment!",
+            "Image editing in progress, just a moment!",
+            "Editing the image, hold on!",
+            "Fine-tuning the image, wait a moment!",
+          ],
+          videoReplies: [
+            "Creating a video, it will take a moment!",
+            "Video processing, patience!",
+            "Working on the video, stay calm!",
+            "Video creation in progress, wait!",
+            "Making a video, please wait!",
+            "Starting the video, just a moment!",
+            "Video creation started, hold on!",
+            "Creating the video, stay tuned!",
+            "Making a video, just a moment!",
+            "Video in progress, hold on!",
+          ],
+          undoReplies: [
+            "Didn't go quite right!",
+            "Sometimes it happens, try again!",
+            "Didn't hit the mark? No worries!",
+            "Didn't get the desired result?",
+            "It doesn't always work, but keep trying!",
+            "It didn't go as planned...",
+            "A small mistake can be a big discovery!",
+            "No failures, only lessons!",
+            "Failure is a step forward!",
+            "No mistakes, only happy accidents!",
+          ],
+          errorReplies: [
+            "Something went wrong, try again!",
+            "An error occurred, please try again!",
+            "Oops, it went wrong, try again!",
+            "Something went wrong, try again!",
+            "Error detected, try again!",
+            "An error occurred, try again!",
+            "It didn't go well, try again!",
+            "Error situation, try again!",
+            "Something went wrong, try again!",
+            "Oops, try again!",
+          ],
+          doneReplies: [
+            "Here's the result, what do you think? It's not a dog without fur!",
+            "Image is ready, is it good? Made by us!",
+            "It's done, do you like it? We'll do better next time!",
+            "Image is ready, what do you say? Better one bird in the hand than ten in the bush!",
+            "Here's the result, how does it look? Not just any bird!",
+            "Ready image, is it acceptable? Not bad, even if I say so myself!",
+            "Here's the result, what do you think? Better than the neighbor's dog!",
+            "Now it's pretty, isn't it? Fits like a glove!",
+            "Here's the ready image, do you like it? It didn't go like Strömsholm!",
+            "Image ready, what's the feeling? Made by me!",
+          ],
+        },
+        fi: {
+          createOrEditReminderReplies: [
+            "Koita vaikka sanoa notta 'tees mulle uus kuva tekoälyagentista'",
+            "Uuteen kuvaan? Sano vaikka 'luo kuva merenrannasta'",
+            "Kuvaidea hukassa? Koita vaikka 'uusi kuva Suomen metsästä'?",
+            "Mitä jos kuvassa olisikin talvi? Sano vaikka 'muokkaa kuvaa talviseksi'",
+            "Muokkausidea? 'muokkaa kuvaan tähtitaivas'",
+            "Mites vaikka, 'mitä jos kuvassa olisi yö'?",
+            "Tämäkin on mahdollista: 'tee tästä kuvasta video'",
+            "Tätä et pakosti arvannut: 'tees kuvasta video'",
+            "Ei tullu mieluista? Sano että 'mennään edelliseen kuvaan'",
+            "Jos et ole tyytyväinen, voit sanoa 'perutaan tämä muutos'",
+          ],
+          createReplies: [
+            "Pistetään kuvaa tulille, ei kestä kauaa!",
+            "Kuvaa väsätään, älä hättäile!",
+            "Uutta kuvaa pukkaa, pysy linjoilla!",
+            "Luodaan mestariteosta, älä hermostu!",
+            "Uutta kuvaa syntyy, malta mieles!",
+            "Viritellään kuvaa, hetki vain!",
+            "Kohta se o valmis, pysy kyydissä!",
+            "Kuva on kohta näpissä, malta hetki!",
+            "Luodaan kuvaa, kestää vähän!",
+            "Kuvanteko käynnissä, odotahan pieni hetki!",
+          ],
+          editReplies: [
+            "Muokataan kuvaa, toivotaan parasta!",
+            "Kuvaa muokataan, kärsivällisyyttä!",
+            "Kuvan viilaus menossa, malta hetki!",
+            "Parannellaan kuvaa, kohta valmista!",
+            "Muokataan kuvaa, pysy rauhassa!",
+            "Uusiks pistetään kuvaa, hetki vaan!",
+            "Kuvaa viilataan, oota hetki!",
+            "Kuvan editointi käynnissä, hetki vaan!",
+            "Muokataan kuvaa, malttia!",
+            "Viilataan kuvaa, oota hetki!",
+          ],
+          videoReplies: [
+            "Videota tehhään, hetki menee!",
+            "Videon käsittelyssä, kärsivällisyyttä!",
+            "Videota työstetään, pysy rauhallisena!",
+            "Videon luominen käynnissä, odota!",
+            "Videota tehtäessä, odotahan!",
+            "Pistetään video käyntiin, hetki vaan!",
+            "Videon teko aloitettu, malta hetki!",
+            "Videota syntyy, pysy linjoilla!",
+            "Videota luodaan, oota pieni hetki!",
+            "Video työn alla, malta hetki!",
+          ],
+          undoReplies: [
+            "Eipä tainnu mennä ihan putkeen!",
+            "Joskus käy näin, uudestaan vaan!",
+            "Ei osunu nappiin? Ei hätää!",
+            "Ei tullut toivottua tulosta?",
+            "Aina ei onnistu, mutta yrittänyttä ei laiteta!",
+            "Ei menny niinku Strömssössä...",
+            "Pieni virhe voi olla suuri löytö!",
+            "Ei oo epäonnistumisia, on vaan oppeja!",
+            "Epäonnistuminen on askel eteenpäin!",
+            "Ei virheitä, vain iloisia vahinkoja!",
+          ],
+          errorReplies: [
+            "Jotain meni pieleen, yritä uusiks!",
+            "Virhe tapahtu, kokeilepa uudelleen!",
+            "Hups, vikaan meni, yritä uusiks!",
+            "Jokin meni pieleen, koetahan uudelleen!",
+            "Virhe havaittu, yritä uusiks!",
+            "Tapahtu virhe, koita uudelleen!",
+            "Ei menny putkeen, yritä uusiks!",
+            "Virhetilanne, yritäpä uusiks!",
+            "Jokin meni vikaan, koita uudelleen!",
+            "Hupsista, kokeile uusiks!",
+          ],
+          doneReplies: [
+            "Tälläänen siitä tuli, mitä tykkäät? Ei oo koira karvoistansa!",
+            "Kuva valmis, onko hyvä? Meirän tekemä!",
+            "Valmista tuli, maistuuko? Pannaan paremmaksi ens kerralla!",
+            "Kuva on valmis, mitäs sanot? Parempi pyy pivossa ku kymmenen oksalla!",
+            "Tässä on lopputulos, miltä näyttää? Ei mikään harakanvarvas!",
+            "Valmis kuva, kelpaako? Ei hassumpi, vaikka itte sanon!",
+            "Lopputulos tässä, mitä tuumit? Parempi ku naapurin koira!",
+            "Nyt tuli nätti, eikös vain? Käy ku nenä päähän!",
+            "Tässä valmis kuva, mitäs tykkäät? Eikä mennyt ku Strömssöössä!",
+            "Kuva valmis, mikä fiilis? Meikä mankeli tekase!",
+          ],
+        },
+      };
     </script>
   </body>
 </html>
