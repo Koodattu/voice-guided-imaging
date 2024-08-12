@@ -143,10 +143,18 @@ def process_full_audio(data):
         return
     with lock:
         result = whisper_model.transcribe("full_audio.webm", task="transcribe", language=transcription_language, fp16=True)
+    if result['text'] == "":
+        emit("empty_transcription", "No audio detected, please try again.")
+        emit("status", "Waiting...")
+        return
     print(f"Full transcription: {result['text']}")
     emit("full_transcription", result["text"])
     with lock:
         result = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language, fp16=True)
+    if result['text'] == "":
+        emit("empty_transcription", "No audio detected, please try again.")
+        emit("status", "Waiting...")
+        return
     print(f"Full translation: {result['text']}")
     emit("translation", result["text"])
 
@@ -250,7 +258,7 @@ def generate_image(prompt):
 def edit_image(parent_image, prompt):
     print(f"Editing image with prompt: {prompt}")
     image = get_saved_image(parent_image)
-    image = image.resize((512, 512), Image.Resampling.LANCZOS)
+    image = image.resize((768, 768), Image.Resampling.LANCZOS)
     pix2pix = load_instruct_pix2pix()
     image = pix2pix(
         prompt=prompt,
