@@ -224,6 +224,7 @@
       }
 
       .logo-image {
+        display: none;
         position: absolute;
         right: 0;
         bottom: 0;
@@ -422,15 +423,15 @@
       <img
         id="logo_image"
         class="logo-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gpt-lab-sjk-v2.png"
+        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png"
       />
       <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
       <img
         id="jr_image"
         class="jr-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png"
+        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png"
       />
-      <h1>Tietoprovinssi Demo - Voice Guided AI Image Editing - GPT Lab Seinäjoki</h1>
+      <h1>Voice Guided AI-Powered Imaging</h1>
 
       <div class="controls-content">
         <div>
@@ -971,6 +972,9 @@
       }
 
       function showGallery() {
+        if (!socket || !socket.connected) {
+          return;
+        }
         main_page.style.display = "none";
         gallery.style.display = "flex";
         panzoom_parent.style.display = "none";
@@ -979,6 +983,9 @@
       }
 
       function showTreeView(image_name) {
+        if (!socket || !socket.connected) {
+          return;
+        }
         main_page.style.display = "none";
         gallery.style.display = "none";
         panzoom_parent.style.opacity = 0;
@@ -1116,15 +1123,40 @@
         }
       }
 
+      jr_image.addEventListener("click", function () {
+        changeAvatar();
+      });
+
+      let speechBubbleEnabled = false;
+      let counter = 1;
       function changeAvatar() {
-        const avatar = document.getElementById("jr_image");
-        avatar.src = avatar.src.includes("jr")
-          ? "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr2.png"
-          : "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png";
+        counter++;
+        switch (counter) {
+          case 1:
+            speechBubbleEnabled = false;
+            logo_image.style.display = "none";
+            jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png";
+            break;
+          case 2:
+            speechBubbleEnabled = true;
+            logo_image.style.display = "block";
+            jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png";
+            break;
+          case 3:
+            speechBubbleEnabled = true;
+            logo_image.style.display = "block";
+            jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jar.png";
+            break;
+          case 4:
+            speechBubbleEnabled = true;
+            logo_image.style.display = "block";
+            jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/pa.png";
+            counter = 0;
+            break;
+        }
       }
 
       let timer = null;
-
       function processJussiRasku(data) {
         let newText =
           language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
