@@ -164,8 +164,9 @@ cython_debug/
 /model_cache
 /gallery
 *.wav
-*.webp
 *.mp4
 /_old_backup
 gallery.json
 full_audio.webm
+generated_video.webp
+/outputs
