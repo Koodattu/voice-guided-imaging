@@ -35,6 +35,7 @@
         flex-direction: column;
         height: 100vh;
         align-items: center;
+        overflow: hidden;
       }
 
       .main-page {
@@ -180,13 +181,6 @@
         border-radius: 8px;
       }
 
-      #generated_image:hover {
-        cursor: pointer;
-        filter: brightness(1.1);
-        transform: scale(1.01);
-        transition: all 0.25s ease-in-out;
-      }
-
       .mic-status {
         width: 125px;
         color: lightcoral;
@@ -244,6 +238,13 @@
         bottom: 0;
         height: 250px;
         opacity: 1;
+      }
+
+      .jr-image:hover {
+        cursor: pointer;
+        filter: brightness(1.1);
+        transform: scale(1.025);
+        transition: all 0.25s ease-in-out;
       }
 
       .hb::before {
@@ -419,11 +420,13 @@
   <body id="body">
     <div class="main-page" id="main_page">
       <img
+        id="logo_image"
         class="logo-image"
         src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gpt-lab-sjk-v2.png"
       />
       <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
       <img
+        id="jr_image"
         class="jr-image"
         src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png"
       />
@@ -492,7 +495,7 @@
             <div class="arrow">→</div>
             <div class="arrow">→</div>
           </div>
-          <div>
+          <div id="whisper_translation">
             <h5>Whisper</h5>
             <h3>Full Translation</h3>
             <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
@@ -566,7 +569,11 @@
         });
       };
 
+      const logo_image = document.getElementById("logo_image");
+      const jr_image = document.getElementById("jr_image");
+
       const transcription = document.getElementById("transcription");
+      const whisper_translation = document.getElementById("whisper_translation");
       const translation = document.getElementById("translation");
       const llm_response = document.getElementById("llm_response");
       transcription.value = "";
@@ -813,6 +820,8 @@
             changeBubbleText("Using Auto Language Detection");
             language = "en";
           }
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
+          whisper_translation.style.display = "block";
         });
 
         rb_en.addEventListener("change", () => {
@@ -821,6 +830,8 @@
             changeBubbleText("Now in English!");
             language = "en";
           }
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "none"));
+          whisper_translation.style.display = "none";
         });
 
         rb_fi.addEventListener("change", () => {
@@ -829,6 +840,8 @@
             changeBubbleText("Puhumme Suomea!");
             language = "fi";
           }
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
+          whisper_translation.style.display = "block";
         });
 
         generated_image.removeEventListener("click", () => {
@@ -1101,6 +1114,13 @@
           translation.style.borderColor = "white";
           llm_response.style.borderColor = "white";
         }
+      }
+
+      function changeAvatar() {
+        const avatar = document.getElementById("jr_image");
+        avatar.src = avatar.src.includes("jr")
+          ? "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr2.png"
+          : "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png";
       }
 
       let timer = null;
