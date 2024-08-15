@@ -271,7 +271,7 @@
         background: #ffd;
         box-shadow: 0 -0.25vmin, 0 0.125vmin;
         font-family: "Comic Sans", "Comic Neue", sans-serif;
-        opacity: 1;
+        opacity: 0;
         transition: all 0.5s ease-in-out;
       }
 
@@ -423,13 +423,13 @@
       <img
         id="logo_image"
         class="logo-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png"
+        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png"
       />
       <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
       <img
         id="jr_image"
         class="jr-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png"
+        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png"
       />
       <h1>Voice Guided AI-Powered Imaging</h1>
 
@@ -523,7 +523,7 @@
       <div class="gen-image-container">
         <img
           id="generated_image"
-          src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp"
+          src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas2.webp"
         />
         <div class="gen-image-buttons">
           <button id="chart_button" class="gallery_chart_button">
@@ -821,9 +821,9 @@
         rb_auto.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "");
-            changeBubbleText("Using Auto Language Detection");
-            language = "en";
           }
+          language = "en";
+          changeBubbleText("Using Auto Language Detection");
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
           whisper_translation.style.display = "block";
         });
@@ -831,9 +831,9 @@
         rb_en.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "en");
-            changeBubbleText("Now in English!");
-            language = "en";
           }
+          language = "en";
+          changeBubbleText("Now in English!");
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "none"));
           whisper_translation.style.display = "none";
         });
@@ -841,9 +841,9 @@
         rb_fi.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "fi");
-            changeBubbleText("Puhumme Suomea!");
-            language = "fi";
           }
+          language = "fi";
+          changeBubbleText("Puhumme Suomea!");
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
           whisper_translation.style.display = "block";
         });
@@ -1140,22 +1140,26 @@
             logo_image.style.display = "none";
             jr_image.src =
               "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png";
+            processJussiRasku("init:gls");
             break;
           case 2:
             speechBubbleEnabled = true;
             logo_image.style.display = "block";
             jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jr.png";
+            processJussiRasku("init:jr");
             break;
           case 3:
             speechBubbleEnabled = true;
             logo_image.style.display = "block";
             jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/jar.png";
+            processJussiRasku("init:jar");
             break;
           case 4:
             speechBubbleEnabled = true;
             logo_image.style.display = "block";
             jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/pa.png";
             counter = 0;
+            processJussiRasku("init:pa");
             break;
         }
       }
@@ -1164,8 +1168,10 @@
       function processJussiRasku(data) {
         let newText =
           language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
-
-        if (data.startsWith("create:")) {
+        if (data.startsWith("init:")) {
+          const guy = data.split(":")[1];
+          newText = responses[language].initReplies[guy];
+        } else if (data.startsWith("create:")) {
           newText =
             responses[language].createReplies[Math.floor(Math.random() * responses[language].createReplies.length)];
         } else if (data.startsWith("edit:")) {
@@ -1207,6 +1213,10 @@
         speech_bubble.style.opacity = "0";
         speech_bubble.style.transform = "translate(0, -60%)";
 
+        if (!speechBubbleEnabled) {
+          return;
+        }
+
         // After the fade out and move up is complete, change the text and reset position
         setTimeout(() => {
           // or textContent? instead of innerText
@@ -1226,6 +1236,12 @@
 
       const responses = {
         en: {
+          initReplies: {
+            jr: "Try saying: Make me a new image of an AI agent?",
+            jar: "Now this is imaging!",
+            pa: "Let's create ten thousand AI agents!",
+            gls: "",
+          },
           createOrEditReminderReplies: [
             "Try saying something like 'make me a new image of an AI agent'",
             "New image? Say something like 'create an image of the seaside'",
@@ -1301,7 +1317,7 @@
           doneReplies: [
             "Here's the result, what do you think? It's not a dog without fur!",
             "Image is ready, is it good? Made by us!",
-            "It's done, do you like it? We'll do better next time!",
+            "It's done, do you like it? We'll do even better next time!",
             "Image is ready, what do you say? Better one bird in the hand than ten in the bush!",
             "Here's the result, how does it look? Not just any bird!",
             "Ready image, is it acceptable? Not bad, even if I say so myself!",
@@ -1312,6 +1328,12 @@
           ],
         },
         fi: {
+          initReplies: {
+            jr: 'Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"?',
+            jar: "Tekoäly agenttina liikenteessä!",
+            pa: "Tehdään kymmenen tuhatta tekoälyagenttia!",
+            gls: "",
+          },
           createOrEditReminderReplies: [
             "Koita vaikka sanoa notta 'tees mulle uus kuva tekoälyagentista'",
             "Uuteen kuvaan? Sano vaikka 'luo kuva merenrannasta'",
