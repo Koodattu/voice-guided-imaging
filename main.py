@@ -11,7 +11,7 @@ from pydub import AudioSegment
 import torch
 from diffusers import EulerAncestralDiscreteScheduler, StableDiffusionInstructPix2PixPipeline, StableVideoDiffusionPipeline, StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler,StableDiffusionXLInstructPix2PixPipeline
 from diffusers.utils import export_to_video
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, login
 from safetensors.torch import load_file
 from PIL import Image
 from pathlib import Path
@@ -20,6 +20,10 @@ import json
 from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
 from flask_cors import CORS
 from threading import Lock
+from dotenv import load_dotenv
+
+load_dotenv()
+login(os.getenv('HUGGINGFACE_TOKEN'))
 
 app = Flask(__name__, template_folder=".")
 CORS(app)
