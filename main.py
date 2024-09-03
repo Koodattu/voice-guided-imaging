@@ -11,7 +11,7 @@ from pydub import AudioSegment
 import torch
 from diffusers import EulerAncestralDiscreteScheduler, StableDiffusionInstructPix2PixPipeline, StableVideoDiffusionPipeline, StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler,StableDiffusionXLInstructPix2PixPipeline
 from diffusers.utils import export_to_video
-from huggingface_hub import hf_hub_download, login
+from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 from PIL import Image
 from pathlib import Path
@@ -20,10 +20,6 @@ import json
 from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
 from flask_cors import CORS
 from threading import Lock
-from dotenv import load_dotenv
-
-load_dotenv()
-login(os.getenv('HUGGINGFACE_TOKEN'))
 
 app = Flask(__name__, template_folder=".")
 CORS(app)
@@ -100,9 +96,9 @@ def load_sdxl_instruct_pix2pix():
     pix2pix_sdxl.enable_model_cpu_offload()
     return pix2pix_sdxl
 
-# https://huggingface.co/docs/diffusers/using-diffusers/svd
+# https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt
 def load_video_diffusion():
-    img2vid = StableVideoDiffusionPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt-1-1", torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
+    img2vid = StableVideoDiffusionPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt", torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
     img2vid.to("cuda")
     img2vid.enable_model_cpu_offload()
     img2vid.unet.enable_forward_chunking()
