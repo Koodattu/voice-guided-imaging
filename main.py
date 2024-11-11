@@ -4,7 +4,6 @@ import os
 import random
 import shutil
 import string
-import whisper
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
@@ -20,6 +19,7 @@ import json
 from moviepy.editor import VideoFileClip, concatenate_videoclips, vfx
 from flask_cors import CORS
 from threading import Lock
+from faster_whisper import WhisperModel
 
 app = Flask(__name__, template_folder=".")
 CORS(app)
@@ -36,7 +36,7 @@ llm = ChatOllama(model="mistral:instruct")
 print(llm.invoke("Respond with: Mistral-instruct ready to server!").content)
 
 print("Loading WHISPER model...")
-whisper_model = whisper.load_model("medium").to(device)
+whisper_model = WhisperModel("large", device="cuda", compute_type="float16")
 print("WHISPER model loaded successfully!")
 
 print("Loading SDXL-Lightning model...")
@@ -61,7 +61,7 @@ def try_catch(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"An error occurred in {function}: {e}")
         socketio.emit("error", f"error: {e}")
 
 
@@ -142,21 +142,25 @@ def process_full_audio(data):
         emit("status", "Waiting...")
         return
     with lock:
-        result = whisper_model.transcribe("full_audio.webm", task="transcribe", language=transcription_language, fp16=True)
-    if result['text'] == "":
+        #result = whisper_model.transcribe("full_audio.webm", task="transcribe", language=transcription_language, fp16=True)
+        segments, _ = whisper_model.transcribe("full_audio.webm", language=transcription_language)
+        result_text = ' '.join([segment.text for segment in segments])
+    if result_text == "":
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
         return
-    print(f"Full transcription: {result['text']}")
-    emit("full_transcription", result["text"])
+    print(f"Full transcription: {result_text}")
+    emit("full_transcription", result_text)
     with lock:
-        result = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language, fp16=True)
-    if result['text'] == "":
+        #result = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language, fp16=True)
+        segments, _ = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language)
+        result_text = ' '.join([segment.text for segment in segments])
+    if result_text == "":
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
         return
-    print(f"Full translation: {result['text']}")
-    emit("translation", result["text"])
+    print(f"Full translation: {result_text}")
+    emit("translation", result_text)
 
 @socketio.on("audio_data")
 def handle_audio_data(data):
@@ -173,9 +177,11 @@ def process_transcription(data):
         f.close()
 
     with lock:
-        result = whisper_model.transcribe("audio.wav", language=transcription_language, fp16=True)
-    print(f"Transcription: {result['text']}")
-    emit("transcription", result["text"])
+        #result = whisper_model.transcribe("audio.wav", language=transcription_language, fp16=True)
+        segments, _ = whisper_model.transcribe("audio.wav", language=transcription_language)
+        result_text = ' '.join([segment.text for segment in segments])
+    print(f"Transcription: {result_text}")
+    emit("transcription", result_text)
 
 @socketio.on("translate")
 def handle_translation():
@@ -185,9 +191,11 @@ def handle_translation():
 def process_translation():
     save_concatenated_audio()
     with lock:
-        result = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language, fp16=True)
-    print(f"Translation: {result['text']}")
-    emit("translation", result["text"])
+        #result = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language, fp16=True)
+        segments, _ = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language)
+        result_text = ' '.join([segment.text for segment in segments])
+    print(f"Translation: {result_text}")
+    emit("translation", result_text)
 
 @app.route("/process_command", methods=["POST"])
 def process_command():
