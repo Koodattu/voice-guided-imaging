@@ -1,4 +1,5 @@
 import base64
+import gc
 import io
 import os
 import random
@@ -8,7 +9,7 @@ from flask import Flask, render_template, request, jsonify, send_file, send_from
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
-from transformers import T5EncoderModel, BitsAndBytesConfig as TransformersBitsAndBytesConfig
+from transformers import T5EncoderModel, pipeline, BitsAndBytesConfig as TransformersBitsAndBytesConfig
 from diffusers import ( 
     BitsAndBytesConfig as DiffusersBitsAndBytesConfig,
     EulerAncestralDiscreteScheduler, 
@@ -22,22 +23,54 @@ from diffusers import (
     EDMEulerScheduler,
     FluxPipeline,
     FluxTransformer2DModel,
+    StableDiffusionLatentUpscalePipeline
 )
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, login
 from safetensors.torch import load_file
 from PIL import Image
 from pathlib import Path
-from langchain_community.chat_models import ChatOllama
 import json
 from moviepy import *
 from flask_cors import CORS
 from threading import Lock
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel, BatchedInferencePipeline
 from dotenv import load_dotenv
+from pydantic import BaseModel
+from openai import OpenAI
+
+CACHE_DIR = "./cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 load_dotenv()
-login(os.getenv('HUGGINGFACE_TOKEN'))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
+login(HUGGINGFACE_TOKEN)
+
+# Set transcription method: "local" for local (faster-whisper) or "rest" for OpenAI Whisper REST API (requires API key)
+TRANSCRIPTION_METHOD="local"
+LOCAL_MODEL_SIZE="large-v3"
+
+OLLAMA_URL = "http://localhost:11434/v1"
+OLLAMA_MODEL = "qwen2.5:3b-instruct-q4_K_M"
+OPENAI_MODEL = "gpt-4o-mini"
+
+# Setup LLM client based on provider choice.
+def get_llm_client(selected_model) -> OpenAI: 
+    if "openai" in selected_model.lower():
+        return OpenAI(api_key=OPENAI_API_KEY)
+    elif "local" in selected_model.lower():
+        return OpenAI(base_url=OLLAMA_URL, api_key="ollama")
+    else:
+        raise ValueError("Unsupported LLM Provider")
+
+def get_llm_model(selected_model):
+    if "openai" in selected_model.lower():
+        return OPENAI_MODEL
+    elif "local" in selected_model.lower():
+        return OLLAMA_MODEL
+    else:
+        raise ValueError("Unsupported LLM Provider")
 
 app = Flask(__name__, template_folder=".")
 CORS(app)
@@ -48,6 +81,14 @@ lock = Lock()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device (cuda/cpu): {device}")
 
+def load_whisper_model():
+    model = WhisperModel("large-v3", device="cuda", compute_type="float16", download_root=CACHE_DIR)
+    return BatchedInferencePipeline(model=model)
+
+def load_translator():
+    translator = pipeline("translation", model="Helsinki-NLP/opus-mt-fi-en", device=0)
+    return translator
+
 # https://huggingface.co/ByteDance/SDXL-Lightning
 def load_sdxl_lightning():
     base = "stabilityai/stable-diffusion-xl-base-1.0"
@@ -55,12 +96,14 @@ def load_sdxl_lightning():
     ckpt = "sdxl_lightning_4step_unet.safetensors"
     unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
     unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
-    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
+    model_path = hf_hub_download(repo, ckpt, cache_dir=CACHE_DIR)
+    unet.load_state_dict(load_file(model_path, device="cuda"))
     txt2img = StableDiffusionXLPipeline.from_pretrained(
         base, 
         unet=unet, 
         torch_dtype=torch.float16, 
-        variant="fp16"
+        variant="fp16",
+        cache_dir=CACHE_DIR
     )
     txt2img.to("cuda")
     txt2img.scheduler = EulerDiscreteScheduler.from_config(
@@ -81,7 +124,8 @@ def load_flux1_schnell():
         "black-forest-labs/FLUX.1-schnell",
         subfolder="text_encoder_2",
         quantization_config=quant_config,
-        torch_dtype=torch.float16
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR
     )
     quant_config = DiffusersBitsAndBytesConfig(
         load_in_4bit=True,
@@ -92,15 +136,17 @@ def load_flux1_schnell():
         "black-forest-labs/FLUX.1-schnell",
         subfolder="transformer",
         quantization_config=quant_config,
-        torch_dtype=torch.float16
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR
     )
     flux1 = FluxPipeline.from_pretrained(
         "black-forest-labs/FLUX.1-schnell",
         text_encoder_2=text_encoder_2_4bit,
         transformer=transformer_4bit,
-        torch_dtype=torch.float16
+        torch_dtype=torch.float16, 
+        cache_dir=CACHE_DIR,
+        low_cpu_mem_usage=True
     )
-    flux1.to("cuda")
     flux1.enable_model_cpu_offload()
     return flux1
 
@@ -109,27 +155,45 @@ def load_instruct_pix2pix():
     pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
         "timbrooks/instruct-pix2pix", 
         torch_dtype=torch.float16, 
-        safety_checker=None
+        safety_checker=None,
+        cache_dir=CACHE_DIR
     )
     pix2pix.to("cuda")
     pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
     pix2pix.enable_model_cpu_offload()
     return pix2pix
 
+# https://huggingface.co/stabilityai/sd-x2-latent-upscaler
+def load_sd_x2_lups():
+    upscaler = StableDiffusionLatentUpscalePipeline.from_pretrained(
+        "stabilityai/sd-x2-latent-upscaler", 
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR
+    )
+    upscaler.to("cuda")
+    upscaler.enable_model_cpu_offload()
+    return upscaler
+
 # https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
 # https://huggingface.co/stabilityai/cosxl
 def load_cosxl_edit():
     vae = AutoencoderKL.from_pretrained(
         "madebyollin/sdxl-vae-fp16-fix", 
-        torch_dtype=torch.float16
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR
     )
-    model_path = "./cosxl_edit.safetensors"
+    model_path = hf_hub_download(
+        repo_id="stabilityai/cosxl",
+        filename="cosxl_edit.safetensors",
+        cache_dir=CACHE_DIR
+    )
     cosxl = StableDiffusionXLInstructPix2PixPipeline.from_single_file(
         model_path, 
         vae=vae, 
         torch_dtype=torch.float16, 
         num_in_channels=8, 
-        is_cosxl_edit=True
+        is_cosxl_edit=True,
+        cache_dir=CACHE_DIR
     )
     cosxl.to("cuda")
     cosxl.scheduler = EDMEulerScheduler(
@@ -147,37 +211,68 @@ def load_video_diffusion():
     img2vid = StableVideoDiffusionPipeline.from_pretrained(
         "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
         torch_dtype=torch.float16,
-        variant="fp16"
+        variant="fp16",
+        cache_dir=CACHE_DIR
     )
     img2vid.to("cuda")
     img2vid.enable_model_cpu_offload()
     img2vid.unet.enable_forward_chunking()
     return img2vid
 
+print("Loading models...")
+
 print("Loading LLM...")
-llm = ChatOllama(model="mistral:instruct")
-print(llm.invoke("Respond with: Mistral-instruct ready to server!").content)
+messages = [
+    {"role": "system", "content": "You are a loader!"},
+    {"role": "user", "content": "Tell me you are loaded!"}
+]
+response = get_llm_client("local").chat.completions.create(
+    model=get_llm_model("local"),
+    messages=messages,
+    max_tokens=20,
+)
+print("LLM loaded successfully: " + response.choices[0].message.content)
 
 print("Loading WHISPER model...")
-whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+whisper_model = load_whisper_model()
 print("WHISPER model loaded successfully!")
 
+print("Loading translator...")
+translator = load_translator()
+print("Translator loaded successfully!")
+
+print("Loading FLUX.1-Schnell model...")
+flux1_txt2img = load_flux1_schnell()
+print("FLUX.1-Schnell model loaded successfully!")
+
 print("Loading SDXL-Lightning model...")
-txt2img = load_sdxl_lightning()
+sdxl_l_txt2img = load_sdxl_lightning()
 print("SDXL-Lightning model loaded successfully!")
 
 print("Loading Instruct-Pix2Pix model...")
-pix2pix = load_instruct_pix2pix()
+pix2pix_img2img = load_instruct_pix2pix()
 print("Instruct-Pix2Pix model loaded successfully!")
 
+print("Loading SD-X2-Latent-Upscaler model...")
+sd_x2_lups = load_sd_x2_lups()
+print("SD-X2-Latent-Upscaler model loaded successfully!")
+
 print("Loading Video-Diffusion model...")
-img2vid = load_video_diffusion()
+svd_xt_img2vid = load_video_diffusion()
 print("Video-Diffusion model loaded successfully!")
 
+print("Loading COSXL-Edit model...")
+sd_cosxl_img2img = load_cosxl_edit()
+print("COSXL-Edit model loaded successfully!")
+
+# empty torch cuda cache
+torch.cuda.empty_cache()
+gc.collect() 
 
 # Holder for whole recording
 audio_segments = []
 transcription_language = None
+selected_model = "fast_local"
 
 def try_catch(function, *args, **kwargs):
     try:
@@ -185,6 +280,57 @@ def try_catch(function, *args, **kwargs):
     except Exception as e:
         print(f"An error occurred in {function}: {e}")
         socketio.emit("error", f"error: {e}")
+
+class LLMOutput(BaseModel):
+    action: str
+    prompt: str
+
+def poll_llm(user_prompt):
+    system_prompt = Path('intention_recognition_prompt.txt').read_text()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    try:
+        response = get_llm_client(selected_model).beta.chat.completions.parse(
+            model=get_llm_model(selected_model),
+            messages=messages,
+            max_tokens=200,
+            response_format=LLMOutput
+        )
+        result = response.choices[0].message.parsed
+        return result.action, result.prompt
+    except Exception as e:
+        print("Error in poll_llm:", e)
+    return None, None
+
+def run_whisper(audio_path, task="transcribe", language=None):
+    if "local" in selected_model:
+        with lock:
+            # run local whisper
+            print("Running local whisper...")
+            if task == "translate" and language == "fi":
+                segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
+                result_text = ' '.join([segment.text for segment in segments])
+                result_text = translator(result_text, max_length=512)[0]['translation_text']
+            else:
+                segments, _ = whisper_model.transcribe(audio_path, language=language, task=task, batch_size=16)
+                result_text = ' '.join([segment.text for segment in segments])
+            return result_text
+    if "openai" in selected_model:
+        # run openai whisper
+        print("Running openai whisper...")
+        if task == "transcribe":
+            response = get_llm_client(selected_model).audio.transcriptions.create(model="whisper-1", file=audio_path, language=language)
+        elif task == "translate":
+            response = get_llm_client(selected_model).audio.translations.create(model="whisper-1", file=audio_path, language=language)
+        else:
+            return ""
+        return response.text.strip()
+
+    # error
+    print("No whisper model selected!")
+    return ""
 
 def save_concatenated_audio():
     concatenated = AudioSegment.empty()
@@ -204,6 +350,13 @@ def handle_lang_select(data):
     transcription_language = None if data == "" else data
     emit("status", "Updated language selection!")
 
+@socketio.on("mdl_select")
+def handle_lang_select(data):
+    print(f"Selected models: {data}")
+    global selected_model
+    selected_model = data
+    emit("status", "Updated model selection!")
+
 @socketio.on("full_audio_data")
 def handle_audio_data(data):
     print("Transcribing full audio data...")
@@ -219,18 +372,14 @@ def process_full_audio(data):
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
         return
-    with lock:
-        segments, _ = whisper_model.transcribe("full_audio.webm", language=transcription_language)
-        result_text = ' '.join([segment.text for segment in segments])
+    result_text = run_whisper("full_audio.webm", "transcribe", transcription_language)
     if result_text == "":
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
         return
     print(f"Full transcription: {result_text}")
     emit("full_transcription", result_text)
-    with lock:
-        segments, _ = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language)
-        result_text = ' '.join([segment.text for segment in segments])
+    result_text = run_whisper("full_audio.webm", "translate", transcription_language)
     if result_text == "":
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
@@ -252,9 +401,8 @@ def process_transcription(data):
         f.write(decode)
         f.close()
 
-    with lock:
-        segments, _ = whisper_model.transcribe("audio.wav", language=transcription_language)
-        result_text = ' '.join([segment.text for segment in segments])
+    result_text = run_whisper("audio.wav", "transcribe", transcription_language)
+
     print(f"Transcription: {result_text}")
     emit("transcription", result_text)
 
@@ -266,8 +414,7 @@ def handle_translation():
 def process_translation():
     save_concatenated_audio()
     with lock:
-        segments, _ = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language)
-        result_text = ' '.join([segment.text for segment in segments])
+        result_text = run_whisper("concatenated_audio.wav", "translate", transcription_language)
     print(f"Translation: {result_text}")
     emit("translation", result_text)
 
@@ -280,11 +427,8 @@ def process_command():
     return try_catch(llm_process_command, image, command)
 
 def llm_process_command(image, command):
-    result = llm.invoke(Path('llm_instructions_command.txt').read_text().replace("<user_input>", command))
-    print(f"LLM response: {result.content}")
-    response = json.loads(result.content)
-    action = response["action"]
-    prompt = response["prompt"]
+    action, prompt = poll_llm(command)
+    print(f"LLM response: {action}, {prompt}")
     socketio.emit("llm_response", action + ": " + prompt)
     if action == "create":
         socketio.emit("status", "Creating new image...")
@@ -328,28 +472,78 @@ def latents_to_rgb(latents):
 
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
-    image = txt2img(
-        prompt,
-        num_inference_steps=4,
-        guidance_scale=0,
-        callback_on_step_end=progress
-    ).images[0]
+
+    if "local" in selected_model:
+        if "fast" in selected_model:
+            image = sdxl_l_txt2img(
+                prompt,
+                num_inference_steps=4,
+                guidance_scale=0,
+                callback_on_step_end=progress
+            ).images[0]
+        if "slow" in selected_model:
+            image = flux1_txt2img(
+                prompt,
+                num_inference_steps=4,
+                guidance_scale=0,
+                callback_on_step_end=progress
+            ).images[0]
+    if "openai" in selected_model:
+        response = get_llm_client(selected_model).images.generate(
+            prompt=prompt,
+            model="dall-e-3",
+            size="1024x1024",
+            response_format="b64_json",
+            quality="standard",
+            n=1,
+        )
+        image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+
     image = save_image(image, prompt)
     return jsonify({"image": image, "prompt": prompt})
 
 def edit_image(parent_image, prompt):
     print(f"Editing image with prompt: {prompt}")
     image = get_saved_image(parent_image)
-    image = image.resize((768, 768), Image.Resampling.LANCZOS)
-    pix2pix = load_instruct_pix2pix()
-    image = pix2pix(
-        prompt=prompt,
-        image=image,
-        num_inference_steps=20,
-        callback_on_step_end=progress
-    ).images[0]
+
+    if "local" in selected_model:
+        if "fast" in selected_model:
+            image = image.resize((512, 512), Image.Resampling.LANCZOS)
+            low_res_latents = pix2pix_img2img(
+                prompt, 
+                image=image, 
+                num_inference_steps=20,
+                output_type="latent",
+                callback_on_step_end=progress
+            ).images
+            image = sd_x2_lups(
+                prompt=prompt,
+                image=low_res_latents,
+                num_inference_steps=20,
+                guidance_scale=0,
+                callback_on_step_end=progress
+            ).images[0]
+        if "slow" in selected_model:
+            image = sd_cosxl_img2img(
+                prompt=prompt,
+                image=image,
+                num_inference_steps=20,
+                callback_on_step_end=progress
+            ).images[0]
+    if "openai" in selected_model:
+        response = get_llm_client(selected_model).images.edit(
+            prompt=prompt,
+            image=image,
+            mask=open("dalle2_mask.png", "rb"),
+            model="dall-e-2",
+            size="1024x1024",
+            response_format="b64_json",
+            quality="standard",
+            n=1,
+        )
+        image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+
     print("Edited image!")
-    image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
     image = save_image(image, prompt, parent=parent_image)
     return jsonify({"image": image, "prompt": prompt})
 
@@ -399,8 +593,7 @@ def generate_video_from_image(parent_image, prompt):
     print("Generating video from image...")
     image = get_saved_image(parent_image)
     image = image.resize((1024, 576), Image.Resampling.LANCZOS)
-    img2vid = load_video_diffusion()
-    frames = img2vid(
+    frames = svd_xt_img2vid(
         image, 
         decode_chunk_size=2, 
         num_inference_steps=10,

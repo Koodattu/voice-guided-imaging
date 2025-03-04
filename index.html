@@ -154,7 +154,7 @@
         padding: 20px;
         align-items: center;
         justify-content: space-evenly;
-        width: 900px;
+        width: 1200px;
       }
 
       .textareas-container {
@@ -540,6 +540,25 @@
             </div>
           </div>
         </div>
+        <div class="input-container height-50">
+          <div class="flex-center">
+            <h3>Models:&nbsp;</h3>
+            <div class="flex-vertical">
+              <div>
+                <input class="rb-input" type="radio" id="rb_fl" name="rb_mdl" checked="true" />
+                <label for="rb_fl">Fast Local</label>
+              </div>
+              <div>
+                <input class="rb-input" type="radio" id="rb_sl" name="rb_mdl" />
+                <label for="rb_sl">Slow Local</label>
+              </div>
+              <div>
+                <input class="rb-input" type="radio" id="rb_oair" name="rb_mdl" />
+                <label for="rb_oair">OpenAI REST</label>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="textareas-container">
@@ -654,6 +673,10 @@
       const rb_auto = document.getElementById("rb_auto");
       const rb_en = document.getElementById("rb_en");
       const rb_fi = document.getElementById("rb_fi");
+
+      const rb_sl = document.getElementById("rb_sl");
+      const rb_fl = document.getElementById("rb_fl");
+      const rb_oair = document.getElementById("rb_oair");
 
       const rb_ptt = document.getElementById("rb_ptt");
       const rb_vad = document.getElementById("rb_vad");
@@ -892,7 +915,6 @@
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
           whisper_translation.style.display = "block";
         });
-
         rb_en.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "en");
@@ -902,7 +924,6 @@
           document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "none"));
           whisper_translation.style.display = "none";
         });
-
         rb_fi.addEventListener("change", () => {
           if (socket && socket.connected) {
             socket.emit("lang_select", "fi");
@@ -913,14 +934,28 @@
           whisper_translation.style.display = "block";
         });
 
+        rb_sl.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("mdl_select", "slow_local");
+          }
+        });
+        rb_fl.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("mdl_select", "fast_local");
+          }
+        });
+        rb_oair.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("mdl_select", "openai_rest");
+          }
+        });
+
         generated_image.removeEventListener("click", () => {
           showGallery();
         });
-
         gallery_button.addEventListener("click", () => {
           showGallery();
         });
-
         chart_button.addEventListener("click", () => {
           showTreeView(generated_image.alt);
         });
