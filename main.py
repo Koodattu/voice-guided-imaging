@@ -8,7 +8,21 @@ from flask import Flask, render_template, request, jsonify, send_file, send_from
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
-from diffusers import EulerAncestralDiscreteScheduler, StableDiffusionInstructPix2PixPipeline, StableVideoDiffusionPipeline, StableDiffusionXLPipeline, UNet2DConditionModel, EulerDiscreteScheduler,StableDiffusionXLInstructPix2PixPipeline
+from transformers import T5EncoderModel, BitsAndBytesConfig as TransformersBitsAndBytesConfig
+from diffusers import ( 
+    BitsAndBytesConfig as DiffusersBitsAndBytesConfig,
+    EulerAncestralDiscreteScheduler, 
+    StableDiffusionInstructPix2PixPipeline, 
+    StableVideoDiffusionPipeline, 
+    StableDiffusionXLPipeline, 
+    UNet2DConditionModel, 
+    EulerDiscreteScheduler,
+    StableDiffusionXLInstructPix2PixPipeline,
+    AutoencoderKL,
+    EDMEulerScheduler,
+    FluxPipeline,
+    FluxTransformer2DModel,
+)
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, login
 from safetensors.torch import load_file
@@ -31,31 +45,135 @@ socketio = SocketIO(app, async_mode="threading")
 
 lock = Lock()
 
-cache_dir = "./model_cache"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device (cuda/cpu): {device}")
+
+# https://huggingface.co/ByteDance/SDXL-Lightning
+def load_sdxl_lightning():
+    base = "stabilityai/stable-diffusion-xl-base-1.0"
+    repo = "ByteDance/SDXL-Lightning"
+    ckpt = "sdxl_lightning_4step_unet.safetensors"
+    unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
+    unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
+    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
+    txt2img = StableDiffusionXLPipeline.from_pretrained(
+        base, 
+        unet=unet, 
+        torch_dtype=torch.float16, 
+        variant="fp16"
+    )
+    txt2img.to("cuda")
+    txt2img.scheduler = EulerDiscreteScheduler.from_config(
+        txt2img.scheduler.config, 
+        timestep_spacing="trailing"
+    )
+    txt2img.enable_model_cpu_offload()
+    return txt2img
+
+# https://huggingface.co/black-forest-labs/FLUX.1-schnell
+def load_flux1_schnell():
+    quant_config = TransformersBitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    text_encoder_2_4bit = T5EncoderModel.from_pretrained(
+        "black-forest-labs/FLUX.1-schnell",
+        subfolder="text_encoder_2",
+        quantization_config=quant_config,
+        torch_dtype=torch.float16
+    )
+    quant_config = DiffusersBitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    transformer_4bit = FluxTransformer2DModel.from_pretrained(
+        "black-forest-labs/FLUX.1-schnell",
+        subfolder="transformer",
+        quantization_config=quant_config,
+        torch_dtype=torch.float16
+    )
+    flux1 = FluxPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-schnell",
+        text_encoder_2=text_encoder_2_4bit,
+        transformer=transformer_4bit,
+        torch_dtype=torch.float16
+    )
+    flux1.to("cuda")
+    flux1.enable_model_cpu_offload()
+    return flux1
+
+# https://huggingface.co/timbrooks/instruct-pix2pix
+def load_instruct_pix2pix():
+    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
+        "timbrooks/instruct-pix2pix", 
+        torch_dtype=torch.float16, 
+        safety_checker=None
+    )
+    pix2pix.to("cuda")
+    pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
+    pix2pix.enable_model_cpu_offload()
+    return pix2pix
+
+# https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
+# https://huggingface.co/stabilityai/cosxl
+def load_cosxl_edit():
+    vae = AutoencoderKL.from_pretrained(
+        "madebyollin/sdxl-vae-fp16-fix", 
+        torch_dtype=torch.float16
+    )
+    model_path = "./cosxl_edit.safetensors"
+    cosxl = StableDiffusionXLInstructPix2PixPipeline.from_single_file(
+        model_path, 
+        vae=vae, 
+        torch_dtype=torch.float16, 
+        num_in_channels=8, 
+        is_cosxl_edit=True
+    )
+    cosxl.to("cuda")
+    cosxl.scheduler = EDMEulerScheduler(
+        sigma_min=0.002, 
+        sigma_max=120.0, 
+        sigma_data=1.0, 
+        prediction_type="v_prediction", 
+        sigma_schedule="exponential"
+    )
+    cosxl.enable_model_cpu_offload()
+    return cosxl
+
+# https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt
+def load_video_diffusion():
+    img2vid = StableVideoDiffusionPipeline.from_pretrained(
+        "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
+        torch_dtype=torch.float16,
+        variant="fp16"
+    )
+    img2vid.to("cuda")
+    img2vid.enable_model_cpu_offload()
+    img2vid.unet.enable_forward_chunking()
+    return img2vid
 
 print("Loading LLM...")
 llm = ChatOllama(model="mistral:instruct")
 print(llm.invoke("Respond with: Mistral-instruct ready to server!").content)
 
 print("Loading WHISPER model...")
-whisper_model = WhisperModel("large", device="cuda", compute_type="float16")
+whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
 print("WHISPER model loaded successfully!")
 
 print("Loading SDXL-Lightning model...")
-base = "stabilityai/stable-diffusion-xl-base-1.0"
-repo = "ByteDance/SDXL-Lightning"
-ckpt = "sdxl_lightning_4step_unet.safetensors"
-unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
-unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
-unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
-txt2img = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
-txt2img.to("cuda")
-txt2img.scheduler = EulerDiscreteScheduler.from_config(txt2img.scheduler.config, timestep_spacing="trailing")
-txt2img.enable_model_cpu_offload()
-txt2img.enable_vae_slicing()
+txt2img = load_sdxl_lightning()
 print("SDXL-Lightning model loaded successfully!")
+
+print("Loading Instruct-Pix2Pix model...")
+pix2pix = load_instruct_pix2pix()
+print("Instruct-Pix2Pix model loaded successfully!")
+
+print("Loading Video-Diffusion model...")
+img2vid = load_video_diffusion()
+print("Video-Diffusion model loaded successfully!")
+
 
 # Holder for whole recording
 audio_segments = []
@@ -67,50 +185,6 @@ def try_catch(function, *args, **kwargs):
     except Exception as e:
         print(f"An error occurred in {function}: {e}")
         socketio.emit("error", f"error: {e}")
-
-
-# https://huggingface.co/ByteDance/SDXL-Lightning
-def load_sdxl_lightning():
-    base = "stabilityai/stable-diffusion-xl-base-1.0"
-    repo = "ByteDance/SDXL-Lightning"
-    ckpt = "sdxl_lightning_4step_unet.safetensors"
-    unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
-    unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
-    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
-    txt2img = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
-    txt2img.to("cuda")
-    txt2img.scheduler = EulerDiscreteScheduler.from_config(txt2img.scheduler.config, timestep_spacing="trailing")
-    txt2img.enable_model_cpu_offload()
-    txt2img.enable_vae_slicing()
-    return txt2img
-
-# https://huggingface.co/timbrooks/instruct-pix2pix
-def load_instruct_pix2pix():
-    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained("timbrooks/instruct-pix2pix", torch_dtype=torch.float16, cache_dir=cache_dir, safety_checker=None)
-    pix2pix.to("cuda")
-    pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
-    pix2pix.enable_model_cpu_offload()
-    pix2pix.enable_vae_slicing()
-    return pix2pix
-
-# https://huggingface.co/diffusers/sdxl-instructpix2pix-768
-def load_sdxl_instruct_pix2pix():
-    pix2pix_sdxl = StableDiffusionXLInstructPix2PixPipeline.from_pretrained("diffusers/sdxl-instructpix2pix-768", torch_dtype=torch.float16, cache_dir=cache_dir)
-    pix2pix_sdxl.to("cuda")
-    pix2pix_sdxl.enable_model_cpu_offload()
-    return pix2pix_sdxl
-
-# https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt
-def load_video_diffusion():
-    img2vid = StableVideoDiffusionPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt-1-1", torch_dtype=torch.float16, variant="fp16", cache_dir=cache_dir)
-    img2vid.to("cuda")
-    img2vid.enable_model_cpu_offload()
-    img2vid.unet.enable_forward_chunking()
-    return img2vid
-
-def unload_model(model):
-    del model
-    torch.cuda.empty_cache()
 
 def save_concatenated_audio():
     concatenated = AudioSegment.empty()
@@ -146,7 +220,6 @@ def process_full_audio(data):
         emit("status", "Waiting...")
         return
     with lock:
-        #result = whisper_model.transcribe("full_audio.webm", task="transcribe", language=transcription_language, fp16=True)
         segments, _ = whisper_model.transcribe("full_audio.webm", language=transcription_language)
         result_text = ' '.join([segment.text for segment in segments])
     if result_text == "":
@@ -156,7 +229,6 @@ def process_full_audio(data):
     print(f"Full transcription: {result_text}")
     emit("full_transcription", result_text)
     with lock:
-        #result = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language, fp16=True)
         segments, _ = whisper_model.transcribe("full_audio.webm", task="translate", language=transcription_language)
         result_text = ' '.join([segment.text for segment in segments])
     if result_text == "":
@@ -181,7 +253,6 @@ def process_transcription(data):
         f.close()
 
     with lock:
-        #result = whisper_model.transcribe("audio.wav", language=transcription_language, fp16=True)
         segments, _ = whisper_model.transcribe("audio.wav", language=transcription_language)
         result_text = ' '.join([segment.text for segment in segments])
     print(f"Transcription: {result_text}")
@@ -195,7 +266,6 @@ def handle_translation():
 def process_translation():
     save_concatenated_audio()
     with lock:
-        #result = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language, fp16=True)
         segments, _ = whisper_model.transcribe("concatenated_audio.wav", task="translate", language=transcription_language)
         result_text = ' '.join([segment.text for segment in segments])
     print(f"Translation: {result_text}")
@@ -278,7 +348,6 @@ def edit_image(parent_image, prompt):
         num_inference_steps=20,
         callback_on_step_end=progress
     ).images[0]
-    unload_model(pix2pix)
     print("Edited image!")
     image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
     image = save_image(image, prompt, parent=parent_image)
@@ -338,7 +407,6 @@ def generate_video_from_image(parent_image, prompt):
         callback_on_step_end=progress
     ).frames[0]
     print("Video generated!")
-    unload_model(img2vid)
     export_to_video(frames, "generated_video.mp4", fps=7)
     mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
     image = Image.open("generated_video.webp")
