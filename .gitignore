@@ -170,3 +170,7 @@ gallery.json
 full_audio.webm
 generated_video.webp
 /outputs
+*.pem
+ngrok.exe
+throwaway-image.png
+edited-image.png

@@ -416,10 +416,69 @@
         filter: brightness(0) invert(1);
         opacity: 0.75;
       }
+
+      .info-box {
+        position: absolute;
+        width: 200px;
+        height: 150px;
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        border-radius: 8px;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 8px;
+      }
+
+      .box-top-left {
+        top: 40px;
+        left: 10px;
+      }
+
+      .box-top-right {
+        top: 10px;
+        right: 10px;
+      }
+
+      #toggle-boxes {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 10;
+        color: white;
+      }
     </style>
   </head>
   <body id="body">
     <div class="main-page" id="main_page">
+      <div id="toggle-boxes">
+        <label>
+          <input type="checkbox" id="toggleCheckbox" />
+          Toggle Info Boxes
+        </label>
+      </div>
+
+      <div class="info-box box-top-left" id="boxTopLeft" style="display: none">
+        <p>Luo minulle uusi kuva...</p>
+        <p>Tee uusi kuva jossa...</p>
+        <p>Muokkaa tätä kuvaa...</p>
+        <p>Mitä jos kuvassa...</p>
+        <p>Lisää kuvaan...</p>
+        <p>Mene takaisin edelliseen...</p>
+        <p>Tee tästä kuvasta video...</p>
+      </div>
+
+      <div class="info-box box-top-right" id="boxTopRight" style="display: none">
+        <p>Python</p>
+        <p>OpenAI Whisper</p>
+        <p>SDXL-Lightning</p>
+        <p>Instruct-Pix2Pix</p>
+        <p>Stable Video Diffusion</p>
+        <p>Ollama</p>
+        <p>Mistral Instruct</p>
+      </div>
+
       <img
         id="logo_image"
         class="logo-image"
@@ -615,6 +674,12 @@
       let shouldTranslate = false;
       let mediaRecorderPTT;
       let chunksPTT = [];
+
+      document.getElementById("toggleCheckbox").addEventListener("change", (event) => {
+        const displayValue = event.target.checked ? "flex" : "none";
+        document.getElementById("boxTopLeft").style.display = displayValue;
+        document.getElementById("boxTopRight").style.display = displayValue;
+      });
 
       rb_ptt.addEventListener("change", () => {
         isRecording = false;
