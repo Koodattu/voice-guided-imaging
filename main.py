@@ -1,10 +1,12 @@
 import base64
-import gc
 import io
 import os
 import random
 import shutil
 import string
+import tempfile
+import time
+import base64
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
@@ -38,6 +40,8 @@ from faster_whisper import WhisperModel, BatchedInferencePipeline
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from openai import OpenAI
+from google import genai
+from google.genai import types
 
 CACHE_DIR = "./cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -45,29 +49,39 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 login(HUGGINGFACE_TOKEN)
 
 # Set transcription method: "local" for local (faster-whisper) or "rest" for OpenAI Whisper REST API (requires API key)
-TRANSCRIPTION_METHOD="local"
-LOCAL_MODEL_SIZE="large-v3"
+LOCAL_SPEED = "fast" # "fast" or "slow"
+LOCAL_MODEL_SIZE="large-v3" # "small", "medium", "large-v3", "turbo"
+CLOUD_PROVIDER = "google" # "openai" or "google"
 
 OLLAMA_URL = "http://localhost:11434/v1"
 OLLAMA_MODEL = "qwen2.5:3b-instruct-q4_K_M"
 OPENAI_MODEL = "gpt-4o-mini"
 
+OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+OLLAMA_CLIENT = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
+GOOGLE_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+
 # Setup LLM client based on provider choice.
 def get_llm_client(selected_model) -> OpenAI: 
-    if "openai" in selected_model.lower():
-        return OpenAI(api_key=OPENAI_API_KEY)
+    if "cloud" in selected_model.lower():
+        print("Using OpenAI API")
+        return OPENAI_CLIENT
     elif "local" in selected_model.lower():
-        return OpenAI(base_url=OLLAMA_URL, api_key="ollama")
+        print("Using Ollama API")
+        return OLLAMA_CLIENT
     else:
         raise ValueError("Unsupported LLM Provider")
 
 def get_llm_model(selected_model):
-    if "openai" in selected_model.lower():
+    if "cloud" in selected_model.lower():
+        print("Using OpenAI model")
         return OPENAI_MODEL
     elif "local" in selected_model.lower():
+        print("Using Ollama model")
         return OLLAMA_MODEL
     else:
         raise ValueError("Unsupported LLM Provider")
@@ -82,15 +96,20 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device (cuda/cpu): {device}")
 
 def load_whisper_model():
+    print("Loading WHISPER model...")
     model = WhisperModel("large-v3", device="cuda", compute_type="float16", download_root=CACHE_DIR)
+    print("WHISPER model loaded successfully!")
     return BatchedInferencePipeline(model=model)
 
 def load_translator():
+    print("Loading translator...")
     translator = pipeline("translation", model="Helsinki-NLP/opus-mt-fi-en", device=0)
+    print("Translator loaded successfully!")
     return translator
 
 # https://huggingface.co/ByteDance/SDXL-Lightning
 def load_sdxl_lightning():
+    print("Loading SDXL-Lightning model...")
     base = "stabilityai/stable-diffusion-xl-base-1.0"
     repo = "ByteDance/SDXL-Lightning"
     ckpt = "sdxl_lightning_4step_unet.safetensors"
@@ -111,10 +130,12 @@ def load_sdxl_lightning():
         timestep_spacing="trailing"
     )
     txt2img.enable_model_cpu_offload()
+    print("SDXL-Lightning model loaded successfully!")
     return txt2img
 
 # https://huggingface.co/black-forest-labs/FLUX.1-schnell
 def load_flux1_schnell():
+    print("Loading FLUX.1-Schnell model...")
     quant_config = TransformersBitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -137,7 +158,8 @@ def load_flux1_schnell():
         subfolder="transformer",
         quantization_config=quant_config,
         torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
+        cache_dir=CACHE_DIR,
+        low_cpu_mem_usage=True
     )
     flux1 = FluxPipeline.from_pretrained(
         "black-forest-labs/FLUX.1-schnell",
@@ -148,10 +170,12 @@ def load_flux1_schnell():
         low_cpu_mem_usage=True
     )
     flux1.enable_model_cpu_offload()
+    print("FLUX.1-Schnell model loaded successfully!")
     return flux1
 
 # https://huggingface.co/timbrooks/instruct-pix2pix
 def load_instruct_pix2pix():
+    print("Loading Instruct-Pix2Pix model...")
     pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
         "timbrooks/instruct-pix2pix", 
         torch_dtype=torch.float16, 
@@ -161,10 +185,12 @@ def load_instruct_pix2pix():
     pix2pix.to("cuda")
     pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
     pix2pix.enable_model_cpu_offload()
+    print("Instruct-Pix2Pix model loaded successfully!")
     return pix2pix
 
 # https://huggingface.co/stabilityai/sd-x2-latent-upscaler
 def load_sd_x2_lups():
+    print("Loading SD-X2-Latent-Upscaler model...")
     upscaler = StableDiffusionLatentUpscalePipeline.from_pretrained(
         "stabilityai/sd-x2-latent-upscaler", 
         torch_dtype=torch.float16,
@@ -172,11 +198,13 @@ def load_sd_x2_lups():
     )
     upscaler.to("cuda")
     upscaler.enable_model_cpu_offload()
+    print("SD-X2-Latent-Upscaler model loaded successfully!")
     return upscaler
 
 # https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
 # https://huggingface.co/stabilityai/cosxl
 def load_cosxl_edit():
+    print("Loading COSXL-Edit model...")
     vae = AutoencoderKL.from_pretrained(
         "madebyollin/sdxl-vae-fp16-fix", 
         torch_dtype=torch.float16,
@@ -204,10 +232,12 @@ def load_cosxl_edit():
         sigma_schedule="exponential"
     )
     cosxl.enable_model_cpu_offload()
+    print("COSXL-Edit model loaded successfully!")
     return cosxl
 
 # https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt
 def load_video_diffusion():
+    print("Loading Video-Diffusion model...")
     img2vid = StableVideoDiffusionPipeline.from_pretrained(
         "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
         torch_dtype=torch.float16,
@@ -217,62 +247,38 @@ def load_video_diffusion():
     img2vid.to("cuda")
     img2vid.enable_model_cpu_offload()
     img2vid.unet.enable_forward_chunking()
+    print("Video-Diffusion model loaded successfully!")
     return img2vid
+
+def load_ollama_llm():
+    print("Loading LLM...")
+    messages = [
+        {"role": "system", "content": "You are a loader!"},
+        {"role": "user", "content": "Tell me you are loaded!"}
+    ]
+    _ = get_llm_client("local").chat.completions.create(model=get_llm_model("local"), messages=messages, max_tokens=20)
+    print("LLM loaded successfully!")
 
 print("Loading models...")
 
-print("Loading LLM...")
-messages = [
-    {"role": "system", "content": "You are a loader!"},
-    {"role": "user", "content": "Tell me you are loaded!"}
-]
-response = get_llm_client("local").chat.completions.create(
-    model=get_llm_model("local"),
-    messages=messages,
-    max_tokens=20,
-)
-print("LLM loaded successfully: " + response.choices[0].message.content)
-
-print("Loading WHISPER model...")
+load_ollama_llm()
 whisper_model = load_whisper_model()
-print("WHISPER model loaded successfully!")
-
-print("Loading translator...")
 translator = load_translator()
-print("Translator loaded successfully!")
-
-print("Loading FLUX.1-Schnell model...")
-flux1_txt2img = load_flux1_schnell()
-print("FLUX.1-Schnell model loaded successfully!")
-
-print("Loading SDXL-Lightning model...")
 sdxl_l_txt2img = load_sdxl_lightning()
-print("SDXL-Lightning model loaded successfully!")
-
-print("Loading Instruct-Pix2Pix model...")
 pix2pix_img2img = load_instruct_pix2pix()
-print("Instruct-Pix2Pix model loaded successfully!")
-
-print("Loading SD-X2-Latent-Upscaler model...")
-sd_x2_lups = load_sd_x2_lups()
-print("SD-X2-Latent-Upscaler model loaded successfully!")
-
-print("Loading Video-Diffusion model...")
 svd_xt_img2vid = load_video_diffusion()
-print("Video-Diffusion model loaded successfully!")
 
-print("Loading COSXL-Edit model...")
-sd_cosxl_img2img = load_cosxl_edit()
-print("COSXL-Edit model loaded successfully!")
+# Experimental upscaling for Instruct-Pix2Pix
+#sd_x2_lups = load_sd_x2_lups()
 
-# empty torch cuda cache
-torch.cuda.empty_cache()
-gc.collect() 
+# Better quality but slower local models
+#flux1_txt2img = load_flux1_schnell()
+#sd_cosxl_img2img = load_cosxl_edit()
 
 # Holder for whole recording
 audio_segments = []
 transcription_language = None
-selected_model = "fast_local"
+selected_model = "local"
 
 def try_catch(function, *args, **kwargs):
     try:
@@ -305,10 +311,9 @@ def poll_llm(user_prompt):
     return None, None
 
 def run_whisper(audio_path, task="transcribe", language=None):
-    if "local" in selected_model:
-        with lock:
-            # run local whisper
-            print("Running local whisper...")
+    print("Running !" + selected_model + "! Whisper for language !" + str(language) + "! and task !" + task + "!")
+    with lock:
+        if "local" in selected_model:
             if task == "translate" and language == "fi":
                 segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
                 result_text = ' '.join([segment.text for segment in segments])
@@ -317,20 +322,34 @@ def run_whisper(audio_path, task="transcribe", language=None):
                 segments, _ = whisper_model.transcribe(audio_path, language=language, task=task, batch_size=16)
                 result_text = ' '.join([segment.text for segment in segments])
             return result_text
-    if "openai" in selected_model:
-        # run openai whisper
-        print("Running openai whisper...")
-        if task == "transcribe":
-            response = get_llm_client(selected_model).audio.transcriptions.create(model="whisper-1", file=audio_path, language=language)
-        elif task == "translate":
-            response = get_llm_client(selected_model).audio.translations.create(model="whisper-1", file=audio_path, language=language)
-        else:
-            return ""
-        return response.text.strip()
+        if "cloud" in selected_model:
+            try:
+                with open(audio_path, "rb") as audio_file:
+                    client = get_llm_client(selected_model)
+                    if task == "transcribe":
+                        response = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file,
+                            language=language,
+                            response_format="text"
+                        )
+                    elif task == "translate":
+                        response = client.audio.translations.create(
+                            model="whisper-1",
+                            file=audio_file,
+                            response_format="text"
+                        )
+                    else:
+                        return ""
+                # Check if response is a dict or has an attribute
+                return response
+            except Exception as e:
+                print(f"An error occurred during OpenAI Whisper processing: {e}")
+                return ""
 
-    # error
-    print("No whisper model selected!")
-    return ""
+        # error
+        print("No whisper model selected!")
+        return ""
 
 def save_concatenated_audio():
     concatenated = AudioSegment.empty()
@@ -366,7 +385,6 @@ def process_full_audio(data):
     decode = base64.b64decode(data)
     with open(f"full_audio.webm", "wb") as f:
         f.write(decode)
-        f.close()
     audio = AudioSegment.from_file("full_audio.webm")
     if len(audio) < 2000:
         emit("empty_transcription", "No audio detected, please try again.")
@@ -399,7 +417,6 @@ def process_transcription(data):
 
     with open(f"audio.wav", "wb") as f:
         f.write(decode)
-        f.close()
 
     result_text = run_whisper("audio.wav", "transcribe", transcription_language)
 
@@ -442,22 +459,66 @@ def llm_process_command(image, command):
     if action == "undo":
         socketio.emit("status", "Reverting to previous image...")
         return previous_image(image)
-    if action == "unknown":
-        return jsonify({"unknown": prompt})
+    if action == "error":
+        return jsonify({"error": prompt})
 
-def progress(pipe, step: int, timestep: int, callback_kwargs):
+def make_generic_callback(pipe):
+    def callback(step: int, timestep: int, latents: torch.Tensor):
+        socketio.emit("status", f"Generating, Step {step+1}")
+        with torch.no_grad():
+            latents_scaled = (1 / 0.18215) * latents
+            image_tensor = pipe.vae.decode(latents_scaled).sample
+            image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+            image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+            pil_images = pipe.numpy_to_pil(image_array)
+            buffered = io.BytesIO()
+            pil_images[0].save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            socketio.emit("image_progress", img_str)
+    return callback
+
+def progress_callback_on_step_end(pipe, step: int, timestep: int, callback_kwargs: dict):
     socketio.emit("status", f"Generating, Step {step+1}")
-    if "StableVideoDiffusion" in str(pipe):
-        return callback_kwargs
+    latents = callback_kwargs.get("latents")
+    with torch.no_grad():
+        latents_scaled = (1 / 0.18215) * latents
+        image_tensor = pipe.vae.decode(latents_scaled).sample
+        image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+        image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+        pil_images = pipe.numpy_to_pil(image_array)
+        buffered = io.BytesIO()
+        pil_images[0].save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        socketio.emit("image_progress", img_str)
+    return callback_kwargs
+
+def video_progress(pipe, step: int, timestep: int, callback_kwargs: dict):
+    socketio.emit("status", f"Generating, Step {step+1}")
+    latents = callback_kwargs.get("latents")
+    first_frame_latents = latents[0, 0:1]
+    with torch.no_grad():
+        latents_scaled = (1 / 0.18215) * first_frame_latents
+        image_tensor = pipe.vae.decode(latents_scaled).sample
+        image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+        image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+        pil_images = pipe.numpy_to_pil(image_array)
+        buffered = io.BytesIO()
+        pil_images[0].save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        socketio.emit("image_progress", img_str)
+    return callback_kwargs
+
+def progress_callback_old(pipe, step: int, timestep: int, callback_kwargs):
+    socketio.emit("status", f"Generating, Step {step+1}")
     latents = callback_kwargs["latents"]
-    image = latents_to_rgb(latents)
+    image = latents_to_rgb_old(latents)
     buffered = io.BytesIO()
     image.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
     socketio.emit("image_progress", img_str)
     return callback_kwargs
 
-def latents_to_rgb(latents):
+def latents_to_rgb_old(latents):
     weights = (
         (60, -60, 25, -70),
         (60,  -5, 15, -50),
@@ -473,31 +534,51 @@ def latents_to_rgb(latents):
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
 
+    start_time = time.time()
+
     if "local" in selected_model:
-        if "fast" in selected_model:
+        if "fast" in LOCAL_SPEED:
             image = sdxl_l_txt2img(
                 prompt,
                 num_inference_steps=4,
                 guidance_scale=0,
-                callback_on_step_end=progress
+                callback_on_step_end=progress_callback_old
             ).images[0]
-        if "slow" in selected_model:
+        if "slow" in LOCAL_SPEED:
             image = flux1_txt2img(
                 prompt,
                 num_inference_steps=4,
                 guidance_scale=0,
-                callback_on_step_end=progress
+                callback_on_step_end=progress_callback_on_step_end
             ).images[0]
-    if "openai" in selected_model:
-        response = get_llm_client(selected_model).images.generate(
-            prompt=prompt,
-            model="dall-e-3",
-            size="1024x1024",
-            response_format="b64_json",
-            quality="standard",
-            n=1,
-        )
-        image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+    if "cloud" in selected_model:
+        if "openai" in CLOUD_PROVIDER:
+            response = get_llm_client(selected_model).images.generate(
+                prompt=prompt,
+                model="dall-e-3",
+                size="1024x1024",
+                response_format="b64_json",
+                quality="standard",
+                n=1,
+            )
+            image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+        if "google" in CLOUD_PROVIDER:
+            response = GOOGLE_CLIENT.models.generate_images(
+                model='imagen-3.0-generate-002',
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio="1:1",
+                )
+            )
+            if not response.generated_images:
+                raise Exception("No edited image output in response.")
+            generated_image = response.generated_images[0]
+            image = Image.open(io.BytesIO(generated_image.image.image_bytes))
+
+    end_time = time.time()
+    elapsed_time = (end_time - start_time) * 1000
+    print(f"Time elapsed: {elapsed_time:.2f} ms")
 
     image = save_image(image, prompt)
     return jsonify({"image": image, "prompt": prompt})
@@ -507,41 +588,73 @@ def edit_image(parent_image, prompt):
     image = get_saved_image(parent_image)
 
     if "local" in selected_model:
-        if "fast" in selected_model:
+        if "fast" in LOCAL_SPEED:
             image = image.resize((512, 512), Image.Resampling.LANCZOS)
+            image = pix2pix_img2img(
+                prompt, 
+                image=image, 
+                num_inference_steps=20,
+                callback_on_step_end=progress_callback_old
+            ).images[0]
+            image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
+        if "experimental" in LOCAL_SPEED:
             low_res_latents = pix2pix_img2img(
                 prompt, 
                 image=image, 
                 num_inference_steps=20,
                 output_type="latent",
-                callback_on_step_end=progress
+                callback_on_step_end=progress_callback_on_step_end
             ).images
+            callback = make_generic_callback(sd_x2_lups)
             image = sd_x2_lups(
                 prompt=prompt,
                 image=low_res_latents,
                 num_inference_steps=20,
                 guidance_scale=0,
-                callback_on_step_end=progress
+                callback=callback,
+                callback_steps=1
             ).images[0]
-        if "slow" in selected_model:
+        if "slow" in LOCAL_SPEED:
+            callback = make_generic_callback(sd_cosxl_img2img)
             image = sd_cosxl_img2img(
                 prompt=prompt,
                 image=image,
                 num_inference_steps=20,
-                callback_on_step_end=progress
+                callback=callback,
+                callback_steps=1
             ).images[0]
-    if "openai" in selected_model:
-        response = get_llm_client(selected_model).images.edit(
-            prompt=prompt,
-            image=image,
-            mask=open("dalle2_mask.png", "rb"),
-            model="dall-e-2",
-            size="1024x1024",
-            response_format="b64_json",
-            quality="standard",
-            n=1,
-        )
-        image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+    if "cloud" in selected_model:
+        if "openai" in CLOUD_PROVIDER:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_file_path = os.path.join(temp_dir, 'temp_image.png')
+                image = image.convert('RGBA')
+                image.save(temp_file_path, format='PNG')
+                with open(temp_file_path, 'rb') as image_file, open("dalle2_mask.png", "rb") as mask_file:
+                    response = get_llm_client(selected_model).images.edit(
+                        prompt=prompt,
+                        image=image_file,
+                        mask=mask_file,
+                        model="dall-e-2",
+                        size="1024x1024",
+                        response_format="b64_json",
+                        n=1,
+                    )
+                image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+        if "google" in CLOUD_PROVIDER:
+            response = GOOGLE_CLIENT.models.generate_content(
+                model="gemini-2.0-flash-exp-image-generation",
+                contents=["Please edit the image: " + prompt, image],
+                config=types.GenerateContentConfig(
+                    response_modalities=['Text', 'Image']
+                )
+            )
+            image = None
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None:
+                    image = Image.open(io.BytesIO(part.inline_data.data))
+                    break
+            if image is None:
+                raise Exception("No edited image output in response.")
 
     print("Edited image!")
     image = save_image(image, prompt, parent=parent_image)
@@ -597,7 +710,7 @@ def generate_video_from_image(parent_image, prompt):
         image, 
         decode_chunk_size=2, 
         num_inference_steps=10,
-        callback_on_step_end=progress
+        callback_on_step_end=video_progress
     ).frames[0]
     print("Video generated!")
     export_to_video(frames, "generated_video.mp4", fps=7)
