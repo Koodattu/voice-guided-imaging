@@ -675,7 +675,7 @@
       translation.value = "";
       llm_response.value = "";
       const generated_image = document.getElementById("generated_image");
-      const spinner = document.getElementById("spinner_container");
+      const spinner_cont = document.getElementById("spinner_container");
       const speech_bubble = document.getElementById("speech_bubble");
 
       const mic_status_box = document.getElementById("mic_status_box");
@@ -783,7 +783,7 @@
                   socket.emit("translate");
                 }
                 backendProcessing = true;
-                spinner.style.display = "flex";
+                spinner_cont.style.display = "flex";
                 updateMicStatusStyle();
               }
             }, 3000);
@@ -907,7 +907,7 @@
           shouldClearTranscription = true;
           updateMicStatusStyle();
           setLLMStage("reset");
-          spinner.style.display = "none";
+          spinner_cont.style.display = "none";
         });
 
         socket.on("image_progress", (data) => {
@@ -974,6 +974,7 @@
       async function processCommand(image, command) {
         backendProcessing = true;
         updateMicStatusStyle();
+        spinner_cont.style.display = "flex";
         system_status.innerText = "Processing command...";
         const response = await fetch("/process_command", {
           method: "POST",
@@ -998,7 +999,7 @@
         shouldClearTranscription = true;
         updateMicStatusStyle();
         setLLMStage("reset");
-        spinner.style.display = "none";
+        spinner_cont.style.display = "none";
         updateGallery();
       }
 

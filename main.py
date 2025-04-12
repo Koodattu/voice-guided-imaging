@@ -42,6 +42,11 @@ from pydantic import BaseModel
 from openai import OpenAI
 from google import genai
 from google.genai import types
+from ollama import Client as OllamaClient
+
+class LLMOutput(BaseModel):
+    action: str
+    prompt: str
 
 CACHE_DIR = "./cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -252,11 +257,20 @@ def load_video_diffusion():
 
 def load_ollama_llm():
     print("Loading LLM...")
-    messages = [
-        {"role": "system", "content": "You are a loader!"},
-        {"role": "user", "content": "Tell me you are loaded!"}
-    ]
-    _ = get_llm_client("local").chat.completions.create(model=get_llm_model("local"), messages=messages, max_tokens=20)
+    payload = {
+        "messages": [
+            {"role": "system", "content": "You are a loader!"},
+            {"role": "user", "content": "Tell me you are loaded!"}
+        ],
+        "model": get_llm_model("local"),
+        "format": LLMOutput.model_json_schema(),
+        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20}
+    }
+    ollama_client = OllamaClient(
+        host='http://localhost:11434',
+        headers={'Content-Type': 'application/json'}
+    )
+    _ = ollama_client.chat(**payload)
     print("LLM loaded successfully!")
 
 print("Loading models...")
@@ -287,12 +301,8 @@ def try_catch(function, *args, **kwargs):
         print(f"An error occurred in {function}: {e}")
         socketio.emit("error", f"error: {e}")
 
-class LLMOutput(BaseModel):
-    action: str
-    prompt: str
-
 def poll_llm(user_prompt):
-    system_prompt = Path('intention_recognition_prompt.txt').read_text()
+    system_prompt = Path('intention_recognition_prompt_v3.txt').read_text()
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
@@ -498,12 +508,13 @@ def video_progress(pipe, step: int, timestep: int, callback_kwargs: dict):
     first_frame_latents = latents[0, 0:1]
     with torch.no_grad():
         latents_scaled = (1 / 0.18215) * first_frame_latents
-        image_tensor = pipe.vae.decode(latents_scaled).sample
+        image_tensor = pipe.vae.decode(latents_scaled, num_frames=1).sample
         image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
         image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
         pil_images = pipe.numpy_to_pil(image_array)
+        resized_image = pil_images[0].resize((1024, 1024), resample=Image.LANCZOS)
         buffered = io.BytesIO()
-        pil_images[0].save(buffered, format="PNG")
+        resized_image.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
         socketio.emit("image_progress", img_str)
     return callback_kwargs
@@ -707,10 +718,11 @@ def generate_video_from_image(parent_image, prompt):
     image = get_saved_image(parent_image)
     image = image.resize((1024, 576), Image.Resampling.LANCZOS)
     frames = svd_xt_img2vid(
-        image, 
+        image=image, 
+        num_frames=14,
         decode_chunk_size=2, 
         num_inference_steps=10,
-        callback_on_step_end=video_progress
+        callback_on_step_end=video_progress,
     ).frames[0]
     print("Video generated!")
     export_to_video(frames, "generated_video.mp4", fps=7)
