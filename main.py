@@ -11,7 +11,7 @@ from flask import Flask, render_template, request, jsonify, send_file, send_from
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
-from transformers import T5EncoderModel, pipeline, BitsAndBytesConfig as TransformersBitsAndBytesConfig
+from transformers import T5EncoderModel, pipeline, BitsAndBytesConfig as TransformersBitsAndBytesConfig, CLIPTextModelWithProjection, CLIPTokenizer
 from diffusers import ( 
     BitsAndBytesConfig as DiffusersBitsAndBytesConfig,
     EulerAncestralDiscreteScheduler, 
@@ -25,7 +25,8 @@ from diffusers import (
     EDMEulerScheduler,
     FluxPipeline,
     FluxTransformer2DModel,
-    StableDiffusionLatentUpscalePipeline
+    StableDiffusionLatentUpscalePipeline,
+    AutoPipelineForText2Image
 )
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, login
@@ -59,7 +60,7 @@ login(HUGGINGFACE_TOKEN)
 
 # Set transcription method: "local" for local (faster-whisper) or "rest" for OpenAI Whisper REST API (requires API key)
 LOCAL_SPEED = "fast" # "fast" or "slow"
-LOCAL_MODEL_SIZE="large-v3" # "small", "medium", "large-v3", "turbo"
+LOCAL_MODEL_SIZE="turbo" # "small", "medium", "large-v3", "turbo"
 CLOUD_PROVIDER = "google" # "openai" or "google"
 
 OLLAMA_URL = "http://localhost:11434/v1"
@@ -102,7 +103,7 @@ print(f"Using device (cuda/cpu): {device}")
 
 def load_whisper_model():
     print("Loading WHISPER model...")
-    model = WhisperModel("large-v3", device="cuda", compute_type="float16", download_root=CACHE_DIR)
+    model = WhisperModel(LOCAL_MODEL_SIZE, device="cuda", compute_type="float16", download_root=CACHE_DIR)
     print("WHISPER model loaded successfully!")
     return BatchedInferencePipeline(model=model)
 
@@ -111,6 +112,15 @@ def load_translator():
     translator = pipeline("translation", model="Helsinki-NLP/opus-mt-fi-en", device=0)
     print("Translator loaded successfully!")
     return translator
+
+# https://huggingface.co/stabilityai/sdxl-turbo
+def load_sdxl_turbo():
+    print("Loading SDXL-Turbo model...")
+    turbo = AutoPipelineForText2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=torch.float16, variant="fp16")
+    turbo.to("cuda")
+    #txt2img.enable_model_cpu_offload()
+    print("SDXL-Turbo model loaded successfully!")
+    return turbo
 
 # https://huggingface.co/ByteDance/SDXL-Lightning
 def load_sdxl_lightning():
@@ -134,7 +144,7 @@ def load_sdxl_lightning():
         txt2img.scheduler.config, 
         timestep_spacing="trailing"
     )
-    txt2img.enable_model_cpu_offload()
+    #txt2img.enable_model_cpu_offload()
     print("SDXL-Lightning model loaded successfully!")
     return txt2img
 
@@ -189,7 +199,7 @@ def load_instruct_pix2pix():
     )
     pix2pix.to("cuda")
     pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
-    pix2pix.enable_model_cpu_offload()
+    #pix2pix.enable_model_cpu_offload()
     print("Instruct-Pix2Pix model loaded successfully!")
     return pix2pix
 
@@ -264,7 +274,7 @@ def load_ollama_llm():
         ],
         "model": get_llm_model("local"),
         "format": LLMOutput.model_json_schema(),
-        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20}
+        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20, "keep_alive": "-1m"}
     }
     ollama_client = OllamaClient(
         host='http://localhost:11434',
@@ -279,8 +289,9 @@ load_ollama_llm()
 whisper_model = load_whisper_model()
 translator = load_translator()
 sdxl_l_txt2img = load_sdxl_lightning()
+#sdxl_turbo = load_sdxl_turbo()
 pix2pix_img2img = load_instruct_pix2pix()
-svd_xt_img2vid = load_video_diffusion()
+#svd_xt_img2vid = load_video_diffusion()
 
 # Experimental upscaling for Instruct-Pix2Pix
 #sd_x2_lups = load_sd_x2_lups()
@@ -302,7 +313,7 @@ def try_catch(function, *args, **kwargs):
         socketio.emit("error", f"error: {e}")
 
 def poll_llm(user_prompt):
-    system_prompt = Path('intention_recognition_prompt_v3.txt').read_text()
+    system_prompt = Path('intention_recognition_prompt_v3_no_video.txt').read_text()
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
@@ -451,7 +462,12 @@ def process_command():
     command = data.get("command")
     image = data.get("image")
     print(f"Processing command: {command}")
-    return try_catch(llm_process_command, image, command)
+    start_time = time.time()
+    result = try_catch(llm_process_command, image, command)
+    end_time = time.time()
+    elapsed_time = (end_time - start_time) * 1000
+    print(f"Time elapsed: {elapsed_time:.2f} ms")
+    return result
 
 def llm_process_command(image, command):
     action, prompt = poll_llm(command)
@@ -545,8 +561,6 @@ def latents_to_rgb_old(latents):
 def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
 
-    start_time = time.time()
-
     if "local" in selected_model:
         if "fast" in LOCAL_SPEED:
             image = sdxl_l_txt2img(
@@ -587,10 +601,6 @@ def generate_image(prompt):
             generated_image = response.generated_images[0]
             image = Image.open(io.BytesIO(generated_image.image.image_bytes))
 
-    end_time = time.time()
-    elapsed_time = (end_time - start_time) * 1000
-    print(f"Time elapsed: {elapsed_time:.2f} ms")
-
     image = save_image(image, prompt)
     return jsonify({"image": image, "prompt": prompt})
 
@@ -604,11 +614,12 @@ def edit_image(parent_image, prompt):
             image = pix2pix_img2img(
                 prompt, 
                 image=image, 
-                num_inference_steps=20,
+                num_inference_steps=40,
                 callback_on_step_end=progress_callback_old
             ).images[0]
             image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
         if "experimental" in LOCAL_SPEED:
+            image = image.resize((256, 256), Image.Resampling.LANCZOS)
             low_res_latents = pix2pix_img2img(
                 prompt, 
                 image=image, 
@@ -625,6 +636,7 @@ def edit_image(parent_image, prompt):
                 callback=callback,
                 callback_steps=1
             ).images[0]
+            image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
         if "slow" in LOCAL_SPEED:
             callback = make_generic_callback(sd_cosxl_img2img)
             image = sd_cosxl_img2img(
