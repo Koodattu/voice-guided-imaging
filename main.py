@@ -64,7 +64,7 @@ LOCAL_MODEL_SIZE="turbo" # "small", "medium", "large-v3", "turbo"
 CLOUD_PROVIDER = "google" # "openai" or "google"
 
 OLLAMA_URL = "http://localhost:11434/v1"
-OLLAMA_MODEL = "qwen2.5:3b-instruct-q4_K_M"
+OLLAMA_MODEL = "qwen2.5:7b-instruct-q4_K_M"
 OPENAI_MODEL = "gpt-4o-mini"
 
 OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
@@ -144,7 +144,7 @@ def load_sdxl_lightning():
         txt2img.scheduler.config, 
         timestep_spacing="trailing"
     )
-    #txt2img.enable_model_cpu_offload()
+    txt2img.enable_model_cpu_offload()
     print("SDXL-Lightning model loaded successfully!")
     return txt2img
 
@@ -194,7 +194,7 @@ def load_instruct_pix2pix():
     pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
         "timbrooks/instruct-pix2pix", 
         torch_dtype=torch.float16, 
-        safety_checker=None,
+        #safety_checker=None,
         cache_dir=CACHE_DIR
     )
     pix2pix.to("cuda")
@@ -577,7 +577,7 @@ def generate_image(prompt):
                 callback_on_step_end=progress_callback_on_step_end
             ).images[0]
     if "cloud" in selected_model:
-        if "openai" in CLOUD_PROVIDER:
+        if "google" in CLOUD_PROVIDER:
             response = get_llm_client(selected_model).images.generate(
                 prompt=prompt,
                 model="dall-e-3",
@@ -587,7 +587,7 @@ def generate_image(prompt):
                 n=1,
             )
             image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
-        if "google" in CLOUD_PROVIDER:
+        if "openai" in CLOUD_PROVIDER:
             response = GOOGLE_CLIENT.models.generate_images(
                 model='imagen-3.0-generate-002',
                 prompt=prompt,
