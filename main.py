@@ -274,7 +274,7 @@ def load_ollama_llm():
         ],
         "model": get_llm_model("local"),
         "format": LLMOutput.model_json_schema(),
-        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20, "keep_alive": "-1m"}
+        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20, "keep_alive": -1}
     }
     ollama_client = OllamaClient(
         host='http://localhost:11434',
