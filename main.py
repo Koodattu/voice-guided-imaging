@@ -59,12 +59,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 login(HUGGINGFACE_TOKEN)
 
 # Set transcription method: "local" for local (faster-whisper) or "rest" for OpenAI Whisper REST API (requires API key)
-LOCAL_SPEED = "fast" # "fast" or "slow"
 LOCAL_MODEL_SIZE="turbo" # "small", "medium", "large-v3", "turbo"
 CLOUD_PROVIDER = "google" # "openai" or "google"
 
 OLLAMA_URL = "http://localhost:11434/v1"
-OLLAMA_MODEL = "qwen2.5:7b-instruct-q4_K_M"
+OLLAMA_MODEL = "qwen3:4b"
 OPENAI_MODEL = "gpt-4o-mini"
 
 OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
@@ -118,7 +117,7 @@ def load_sdxl_turbo():
     print("Loading SDXL-Turbo model...")
     turbo = AutoPipelineForText2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=torch.float16, variant="fp16")
     turbo.to("cuda")
-    #txt2img.enable_model_cpu_offload()
+    turbo.enable_model_cpu_offload()
     print("SDXL-Turbo model loaded successfully!")
     return turbo
 
@@ -298,12 +297,12 @@ pix2pix_img2img = load_instruct_pix2pix()
 
 # Better quality but slower local models
 #flux1_txt2img = load_flux1_schnell()
-#sd_cosxl_img2img = load_cosxl_edit()
+sd_cosxl_img2img = load_cosxl_edit()
 
 # Holder for whole recording
 audio_segments = []
 transcription_language = None
-selected_model = "local"
+selected_model = "localfast"
 
 def try_catch(function, *args, **kwargs):
     try:
@@ -319,11 +318,16 @@ def poll_llm(user_prompt):
         {"role": "user", "content": user_prompt}
     ]
     try:
+        extra_body = None
+        if "local" in selected_model:
+            extra_body = {"num_ctx": 1280, "keep_alive": -1}
+
         response = get_llm_client(selected_model).beta.chat.completions.parse(
             model=get_llm_model(selected_model),
             messages=messages,
             max_tokens=200,
-            response_format=LLMOutput
+            response_format=LLMOutput,
+            extra_body=extra_body,
         )
         result = response.choices[0].message.parsed
         return result.action, result.prompt
@@ -488,34 +492,37 @@ def llm_process_command(image, command):
     if action == "error":
         return jsonify({"error": prompt})
 
-def make_generic_callback(pipe):
+def make_optimised_callback(pipe, frequency: int = 11):
     def callback(step: int, timestep: int, latents: torch.Tensor):
         socketio.emit("status", f"Generating, Step {step+1}")
-        with torch.no_grad():
-            latents_scaled = (1 / 0.18215) * latents
-            image_tensor = pipe.vae.decode(latents_scaled).sample
-            image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-            image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-            pil_images = pipe.numpy_to_pil(image_array)
-            buffered = io.BytesIO()
-            pil_images[0].save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-            socketio.emit("image_progress", img_str)
+        if step % frequency == 0:
+            with torch.no_grad():
+                latents_scaled = (1 / 0.18215) * latents
+                image_tensor = pipe.vae.decode(latents_scaled).sample
+                image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+                image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+                pil_images = pipe.numpy_to_pil(image_array)
+
+                if pil_images and len(pil_images) > 0:
+                    image_to_send = pil_images[0]
+                    buffered = io.BytesIO()
+                    image_to_send.save(buffered, format="PNG")
+                    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                    socketio.emit("image_progress", img_str)
     return callback
 
 def progress_callback_on_step_end(pipe, step: int, timestep: int, callback_kwargs: dict):
     socketio.emit("status", f"Generating, Step {step+1}")
     latents = callback_kwargs.get("latents")
-    with torch.no_grad():
-        latents_scaled = (1 / 0.18215) * latents
-        image_tensor = pipe.vae.decode(latents_scaled).sample
-        image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-        image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-        pil_images = pipe.numpy_to_pil(image_array)
-        buffered = io.BytesIO()
-        pil_images[0].save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        socketio.emit("image_progress", img_str)
+    latents_scaled = (1 / 0.18215) * latents
+    image_tensor = pipe.vae.decode(latents_scaled).sample
+    image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+    image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+    pil_images = pipe.numpy_to_pil(image_array)
+    buffered = io.BytesIO()
+    pil_images[0].save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    socketio.emit("image_progress", img_str)
     return callback_kwargs
 
 def video_progress(pipe, step: int, timestep: int, callback_kwargs: dict):
@@ -562,22 +569,22 @@ def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
 
     if "local" in selected_model:
-        if "fast" in LOCAL_SPEED:
+        if "fast" in selected_model or "slow" in selected_model:
             image = sdxl_l_txt2img(
                 prompt,
                 num_inference_steps=4,
                 guidance_scale=0,
                 callback_on_step_end=progress_callback_old
             ).images[0]
-        if "slow" in LOCAL_SPEED:
+        if "veryslow" in selected_model:
             image = flux1_txt2img(
                 prompt,
                 num_inference_steps=4,
                 guidance_scale=0,
-                callback_on_step_end=progress_callback_on_step_end
+                #callback_on_step_end=progress_callback_on_step_end
             ).images[0]
     if "cloud" in selected_model:
-        if "google" in CLOUD_PROVIDER:
+        if "openai" in CLOUD_PROVIDER:
             response = get_llm_client(selected_model).images.generate(
                 prompt=prompt,
                 model="dall-e-3",
@@ -587,7 +594,7 @@ def generate_image(prompt):
                 n=1,
             )
             image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
-        if "openai" in CLOUD_PROVIDER:
+        if "google" in CLOUD_PROVIDER:
             response = GOOGLE_CLIENT.models.generate_images(
                 model='imagen-3.0-generate-002',
                 prompt=prompt,
@@ -609,7 +616,7 @@ def edit_image(parent_image, prompt):
     image = get_saved_image(parent_image)
 
     if "local" in selected_model:
-        if "fast" in LOCAL_SPEED:
+        if "fast" in selected_model:
             image = image.resize((512, 512), Image.Resampling.LANCZOS)
             image = pix2pix_img2img(
                 prompt, 
@@ -618,27 +625,8 @@ def edit_image(parent_image, prompt):
                 callback_on_step_end=progress_callback_old
             ).images[0]
             image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
-        if "experimental" in LOCAL_SPEED:
-            image = image.resize((256, 256), Image.Resampling.LANCZOS)
-            low_res_latents = pix2pix_img2img(
-                prompt, 
-                image=image, 
-                num_inference_steps=20,
-                output_type="latent",
-                callback_on_step_end=progress_callback_on_step_end
-            ).images
-            callback = make_generic_callback(sd_x2_lups)
-            image = sd_x2_lups(
-                prompt=prompt,
-                image=low_res_latents,
-                num_inference_steps=20,
-                guidance_scale=0,
-                callback=callback,
-                callback_steps=1
-            ).images[0]
-            image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
-        if "slow" in LOCAL_SPEED:
-            callback = make_generic_callback(sd_cosxl_img2img)
+        if "slow" in selected_model:
+            callback = make_optimised_callback(sd_cosxl_img2img)
             image = sd_cosxl_img2img(
                 prompt=prompt,
                 image=image,

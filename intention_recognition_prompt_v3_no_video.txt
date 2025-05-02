@@ -75,3 +75,4 @@ Do not return any additional text.
 - Do not over-simplify.
 - Prioritize descriptive richness suitable for image generation models.
 
+/no_think
