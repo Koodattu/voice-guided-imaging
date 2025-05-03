@@ -868,7 +868,8 @@
 
       document.addEventListener("DOMContentLoaded", (event) => {
         updateMicStatusStyle();
-        socket = io();
+        //socket = io();
+        socket = io({ path: "/kuvagen/socket.io" });
 
         socket.on("connect", () => {
           console.log("Connected to server");
@@ -991,7 +992,7 @@
         updateMicStatusStyle();
         spinner_cont.style.display = "flex";
         system_status.innerText = "Processing command...";
-        const response = await fetch("/process_command", {
+        const response = await fetch("/kuvagen/process_command", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1003,7 +1004,7 @@
           system_status.innerText = "Unknown: " + json.unknown;
           processJussiRasku("unknown:");
         } else {
-          generated_image.src = `/images/${json.image}`;
+          generated_image.src = `/kuvagen/images/${json.image}`;
           generated_image.alt = json.image;
           system_status.innerText = "Done! Waiting for input...";
           if (!json.action || json.action !== "undo") {
@@ -1056,7 +1057,7 @@
       });
 
       function updateGallery() {
-        fetch("/images")
+        fetch("/kuvagen/images")
           .then((response) => response.json())
           .then((images) => {
             const gallery = document.getElementById("gallery");
@@ -1066,7 +1067,7 @@
                 container.className = "image-container";
 
                 const img = document.createElement("img");
-                img.src = `/images/${image.name}`;
+                img.src = `/kuvagen/images/${image.name}`;
                 img.alt = image.name;
                 img.addEventListener("click", () => {
                   showMainPage(image.name);
@@ -1092,7 +1093,7 @@
         gallery.style.display = "none";
         panzoom_parent.style.display = "none";
         image_name = image_name.split("?")[0];
-        generated_image.src = `/images/${image_name}`;
+        generated_image.src = `/kuvagen/images/${image_name}`;
         generated_image.alt = image_name;
         body.style.overflow = "auto";
         body.style.cursor = "default";
@@ -1123,7 +1124,7 @@
       }
 
       async function generateTreeView(image_name) {
-        const galleryJson = await fetch("/gallery").then((response) => response.json());
+        const galleryJson = await fetch("/kuvagen/gallery").then((response) => response.json());
 
         // Helper function to find node by name
         function findNodeByName(name, nodes) {
@@ -1146,7 +1147,7 @@
             },
             children: [
               {
-                image: `/images/${node.name}`,
+                image: `/kuvagen/images/${node.name}`,
                 children: children,
               },
             ],

@@ -93,7 +93,7 @@ def get_llm_model(selected_model):
 
 app = Flask(__name__, template_folder=".")
 CORS(app)
-socketio = SocketIO(app, async_mode="threading")
+socketio = SocketIO(app, async_mode="threading", path="/kuvagen/socket.io")
 
 lock = Lock()
 
@@ -460,7 +460,7 @@ def process_translation():
     print(f"Translation: {result_text}")
     emit("translation", result_text)
 
-@app.route("/process_command", methods=["POST"])
+@app.route("/kuvagen/process_command", methods=["POST"])
 def process_command():
     data = request.json
     command = data.get("command")
@@ -744,15 +744,15 @@ def get_saved_image(image_name):
                 return get_saved_image(obj["parent"])
     return None
 
-@app.route("/gallery")
+@app.route("/kuvagen/gallery")
 def get_gallery_json():
     return send_file("gallery.json", mimetype="application/json")
 
-@app.route("/images/<image>")
+@app.route("/kuvagen/images/<image>")
 def get_image(image):
     return send_from_directory("./gallery", image + ".webp")
 
-@app.route("/images")
+@app.route("/kuvagen/images")
 def images():
     gallery_json = "gallery.json"
     if not os.path.exists(gallery_json):
@@ -807,7 +807,7 @@ def add_to_json_file(name, prompt, parent):
     with open(filename, 'w') as file:
         json.dump(data, file, indent=4)
 
-@app.route("/")
+@app.route("/kuvagen/")
 def index():
     return render_template("index.html")
 
