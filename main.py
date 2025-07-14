@@ -5,6 +5,7 @@ import random
 import shutil
 import string
 import tempfile
+import threading
 import time
 import base64
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
@@ -12,13 +13,13 @@ from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
 from transformers import T5EncoderModel, pipeline, BitsAndBytesConfig as TransformersBitsAndBytesConfig, CLIPTextModelWithProjection, CLIPTokenizer
-from diffusers import ( 
+from diffusers import (
     BitsAndBytesConfig as DiffusersBitsAndBytesConfig,
-    EulerAncestralDiscreteScheduler, 
-    StableDiffusionInstructPix2PixPipeline, 
-    StableVideoDiffusionPipeline, 
-    StableDiffusionXLPipeline, 
-    UNet2DConditionModel, 
+    EulerAncestralDiscreteScheduler,
+    StableDiffusionInstructPix2PixPipeline,
+    StableVideoDiffusionPipeline,
+    StableDiffusionXLPipeline,
+    UNet2DConditionModel,
     EulerDiscreteScheduler,
     StableDiffusionXLInstructPix2PixPipeline,
     AutoencoderKL,
@@ -26,7 +27,8 @@ from diffusers import (
     FluxPipeline,
     FluxTransformer2DModel,
     StableDiffusionLatentUpscalePipeline,
-    AutoPipelineForText2Image
+    AutoPipelineForText2Image,
+    FluxKontextPipeline
 )
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, login
@@ -63,15 +65,18 @@ LOCAL_MODEL_SIZE="turbo" # "small", "medium", "large-v3", "turbo"
 CLOUD_PROVIDER = "google" # "openai" or "google"
 
 OLLAMA_URL = "http://localhost:11434/v1"
-OLLAMA_MODEL = "qwen3:4b"
+OLLAMA_MODEL = "hf.co/mradermacher/Llama-Poro-2-8B-Instruct-GGUF:Q4_K_M"#"qwen3:4b"
 OPENAI_MODEL = "gpt-4o-mini"
 
 OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
 OLLAMA_CLIENT = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
 GOOGLE_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
 
+USE_OPUS_TRANSLATION = True # Alternative Finnish to English translation model
+SKIP_TRANSLATION = True  # Set to True to skip translation step
+
 # Setup LLM client based on provider choice.
-def get_llm_client(selected_model) -> OpenAI: 
+def get_llm_client(selected_model) -> OpenAI:
     if "cloud" in selected_model.lower():
         print("Using OpenAI API")
         return OPENAI_CLIENT
@@ -132,15 +137,15 @@ def load_sdxl_lightning():
     model_path = hf_hub_download(repo, ckpt, cache_dir=CACHE_DIR)
     unet.load_state_dict(load_file(model_path, device="cuda"))
     txt2img = StableDiffusionXLPipeline.from_pretrained(
-        base, 
-        unet=unet, 
-        torch_dtype=torch.float16, 
+        base,
+        unet=unet,
+        torch_dtype=torch.float16,
         variant="fp16",
         cache_dir=CACHE_DIR
     )
     txt2img.to("cuda")
     txt2img.scheduler = EulerDiscreteScheduler.from_config(
-        txt2img.scheduler.config, 
+        txt2img.scheduler.config,
         timestep_spacing="trailing"
     )
     txt2img.enable_model_cpu_offload()
@@ -179,7 +184,47 @@ def load_flux1_schnell():
         "black-forest-labs/FLUX.1-schnell",
         text_encoder_2=text_encoder_2_4bit,
         transformer=transformer_4bit,
-        torch_dtype=torch.float16, 
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR,
+        low_cpu_mem_usage=True
+    )
+    flux1.enable_model_cpu_offload()
+    print("FLUX.1-Schnell model loaded successfully!")
+    return flux1
+
+# https://huggingface.co/black-forest-labs/FLUX.1-schnell
+def load_flux1_kontext_dev():
+    print("Loading FLUX.1-Kontext-dev model...")
+    quant_config = TransformersBitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    text_encoder_2_4bit = T5EncoderModel.from_pretrained(
+        "black-forest-labs/FLUX.1-Kontext-dev",
+        subfolder="text_encoder_2",
+        quantization_config=quant_config,
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR
+    )
+    quant_config = DiffusersBitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    transformer_4bit = FluxTransformer2DModel.from_pretrained(
+        "black-forest-labs/FLUX.1-Kontext-dev",
+        subfolder="transformer",
+        quantization_config=quant_config,
+        torch_dtype=torch.float16,
+        cache_dir=CACHE_DIR,
+        low_cpu_mem_usage=True
+    )
+    flux1 = FluxKontextPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-Kontext-dev",
+        text_encoder_2=text_encoder_2_4bit,
+        transformer=transformer_4bit,
+        torch_dtype=torch.float16,
         cache_dir=CACHE_DIR,
         low_cpu_mem_usage=True
     )
@@ -191,8 +236,8 @@ def load_flux1_schnell():
 def load_instruct_pix2pix():
     print("Loading Instruct-Pix2Pix model...")
     pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-        "timbrooks/instruct-pix2pix", 
-        torch_dtype=torch.float16, 
+        "timbrooks/instruct-pix2pix",
+        torch_dtype=torch.float16,
         #safety_checker=None,
         cache_dir=CACHE_DIR
     )
@@ -206,7 +251,7 @@ def load_instruct_pix2pix():
 def load_sd_x2_lups():
     print("Loading SD-X2-Latent-Upscaler model...")
     upscaler = StableDiffusionLatentUpscalePipeline.from_pretrained(
-        "stabilityai/sd-x2-latent-upscaler", 
+        "stabilityai/sd-x2-latent-upscaler",
         torch_dtype=torch.float16,
         cache_dir=CACHE_DIR
     )
@@ -220,7 +265,7 @@ def load_sd_x2_lups():
 def load_cosxl_edit():
     print("Loading COSXL-Edit model...")
     vae = AutoencoderKL.from_pretrained(
-        "madebyollin/sdxl-vae-fp16-fix", 
+        "madebyollin/sdxl-vae-fp16-fix",
         torch_dtype=torch.float16,
         cache_dir=CACHE_DIR
     )
@@ -230,19 +275,19 @@ def load_cosxl_edit():
         cache_dir=CACHE_DIR
     )
     cosxl = StableDiffusionXLInstructPix2PixPipeline.from_single_file(
-        model_path, 
-        vae=vae, 
-        torch_dtype=torch.float16, 
-        num_in_channels=8, 
+        model_path,
+        vae=vae,
+        torch_dtype=torch.float16,
+        num_in_channels=8,
         is_cosxl_edit=True,
         cache_dir=CACHE_DIR
     )
     cosxl.to("cuda")
     cosxl.scheduler = EDMEulerScheduler(
-        sigma_min=0.002, 
-        sigma_max=120.0, 
-        sigma_data=1.0, 
-        prediction_type="v_prediction", 
+        sigma_min=0.002,
+        sigma_max=120.0,
+        sigma_data=1.0,
+        prediction_type="v_prediction",
         sigma_schedule="exponential"
     )
     cosxl.enable_model_cpu_offload()
@@ -282,6 +327,14 @@ def load_ollama_llm():
     _ = ollama_client.chat(**payload)
     print("LLM loaded successfully!")
 
+def periodic_ollama_loader():
+    while True:
+        try:
+            load_ollama_llm()
+        except Exception as e:
+            print(f"Error in periodic Ollama loader: {e}")
+        time.sleep(60)
+
 print("Loading models...")
 
 load_ollama_llm()
@@ -297,6 +350,7 @@ pix2pix_img2img = load_instruct_pix2pix()
 
 # Better quality but slower local models
 #flux1_txt2img = load_flux1_schnell()
+#flux1_img2img = load_flux1_kontext_dev()
 sd_cosxl_img2img = load_cosxl_edit()
 
 # Holder for whole recording
@@ -339,33 +393,33 @@ def run_whisper(audio_path, task="transcribe", language=None):
     print("Running !" + selected_model + "! Whisper for language !" + str(language) + "! and task !" + task + "!")
     with lock:
         if "local" in selected_model:
-            if task == "translate" and language == "fi":
-                segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
-                result_text = ' '.join([segment.text for segment in segments])
-                result_text = translator(result_text, max_length=512)[0]['translation_text']
-            else:
-                segments, _ = whisper_model.transcribe(audio_path, language=language, task=task, batch_size=16)
-                result_text = ' '.join([segment.text for segment in segments])
+            if task == "translate" and not SKIP_TRANSLATION:
+                if language == "fi" and USE_OPUS_TRANSLATION:
+                    segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
+                    result_text = ' '.join([segment.text for segment in segments])
+                    result_text = translator(result_text, max_length=512)[0]['translation_text']
+                    return result_text
+
+            segments, _ = whisper_model.transcribe(audio_path, language=language, task=task, batch_size=16)
+            result_text = ' '.join([segment.text for segment in segments])
             return result_text
         if "cloud" in selected_model:
             try:
                 with open(audio_path, "rb") as audio_file:
                     client = get_llm_client(selected_model)
-                    if task == "transcribe":
-                        response = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=audio_file,
-                            language=language,
-                            response_format="text"
-                        )
-                    elif task == "translate":
+                    if task == "translate" and not SKIP_TRANSLATION:
                         response = client.audio.translations.create(
                             model="whisper-1",
                             file=audio_file,
                             response_format="text"
                         )
                     else:
-                        return ""
+                        response = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file,
+                            language=language,
+                            response_format="text"
+                        )
                 # Check if response is a dict or has an attribute
                 return response
             except Exception as e:
@@ -619,14 +673,23 @@ def edit_image(parent_image, prompt):
         if "fast" in selected_model:
             image = image.resize((512, 512), Image.Resampling.LANCZOS)
             image = pix2pix_img2img(
-                prompt, 
-                image=image, 
+                prompt,
+                image=image,
                 num_inference_steps=40,
                 callback_on_step_end=progress_callback_old
             ).images[0]
             image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
+        if "slow2" in selected_model:
+            callback = make_optimised_callback(flux1_img2img)
+            image = flux1_img2img(
+                prompt=prompt,
+                image=image,
+                num_inference_steps=20,
+                #callback=callback,
+                #callback_steps=1
+            ).images[0]
         if "slow" in selected_model:
-            callback = make_optimised_callback(sd_cosxl_img2img)
+            callback = make_optimised_callback(sd_cosxl_img2img, frequency=21)
             image = sd_cosxl_img2img(
                 prompt=prompt,
                 image=image,
@@ -679,10 +742,10 @@ def previous_image(image):
             prompt = obj["prompt"]
             parent = obj["parent"]
             break
-    
+
     if parent:
         return jsonify({"image": parent, "prompt": prompt, "action": "undo"})
-    
+
     image_file = get_previous_image("./gallery", image + ".webp")
     for obj in gallery_json:
         if obj["name"] == image_file:
@@ -718,9 +781,9 @@ def generate_video_from_image(parent_image, prompt):
     image = get_saved_image(parent_image)
     image = image.resize((1024, 576), Image.Resampling.LANCZOS)
     frames = svd_xt_img2vid(
-        image=image, 
+        image=image,
         num_frames=14,
-        decode_chunk_size=2, 
+        decode_chunk_size=2,
         num_inference_steps=10,
         callback_on_step_end=video_progress,
     ).frames[0]
@@ -813,4 +876,5 @@ def index():
 
 if __name__ == "__main__":
     print("Server started, ready to go!")
+    threading.Thread(target=periodic_ollama_loader, daemon=True).start()
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)

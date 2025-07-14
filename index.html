@@ -9,7 +9,8 @@
     <!-- frontend backend communication -->
     <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
     <!-- ort is required by vad -->
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+    <!--<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>-->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.1/dist/ort.min.js"></script>
     <!-- vad for audio recording -->
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad/dist/index.browser.js"></script>
     <!-- font awesome for icons -->
@@ -492,13 +493,14 @@
 
       <div class="info-box box-top-right" id="boxTopRight" style="display: none">
         <p>Python</p>
-        <p>OpenAI Whisper</p>
-        <p>OPUS MT</p>
-        <p>SDXL-Lightning</p>
-        <p>Instruct-Pix2Pix</p>
-        <p>Stable Video Diffusion</p>
-        <p>Ollama</p>
-        <p>Qwen3</p>
+        <p>OpenAI - Faster Whisper</p>
+        <p>Helsinki NLP - OPUS MT</p>
+        <p>ByteDance - SDXL-Lightning</p>
+        <p>TimBrooks - Instruct-Pix2Pix</p>
+        <p>Stable Diffusion - CosXL-Edit</p>
+        <p>OpenAI - Dall-E 3</p>
+        <p>Google - Gemini 2.0</p>
+        <p>Ollama - Qwen3</p>
       </div>
 
       <img
@@ -568,11 +570,11 @@
             <div class="flex-vertical">
               <div>
                 <input class="rb-input" type="radio" id="rb_local_fast" name="rb_model" checked="true" />
-                <label for="rb_local_fast">Local (Fast)</label>
+                <label for="rb_local_fast">Local (Fast Edits)</label>
               </div>
               <div>
                 <input class="rb-input" type="radio" id="rb_local_slow" name="rb_model" />
-                <label for="rb_local_slow">Local (Slow)</label>
+                <label for="rb_local_slow">Local (Better Edits)</label>
               </div>
               <div>
                 <input class="rb-input" type="radio" id="rb_cloud" name="rb_model" />
