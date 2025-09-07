@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import os
 import random
 import shutil
@@ -7,7 +8,6 @@ import string
 import tempfile
 import threading
 import time
-import base64
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
@@ -72,9 +72,6 @@ OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
 OLLAMA_CLIENT = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
 GOOGLE_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
 
-USE_OPUS_TRANSLATION = True # Alternative Finnish to English translation model
-SKIP_TRANSLATION = True  # Set to True to skip translation step
-
 # Setup LLM client based on provider choice.
 def get_llm_client(selected_model) -> OpenAI:
     if "cloud" in selected_model.lower():
@@ -110,12 +107,6 @@ def load_whisper_model():
     model = WhisperModel(LOCAL_MODEL_SIZE, device="cuda", compute_type="float16", download_root=CACHE_DIR)
     print("WHISPER model loaded successfully!")
     return BatchedInferencePipeline(model=model)
-
-def load_translator():
-    print("Loading translator...")
-    translator = pipeline("translation", model="Helsinki-NLP/opus-mt-fi-en", device=0)
-    print("Translator loaded successfully!")
-    return translator
 
 # https://huggingface.co/stabilityai/sdxl-turbo
 def load_sdxl_turbo():
@@ -339,7 +330,6 @@ print("Loading models...")
 
 load_ollama_llm()
 whisper_model = load_whisper_model()
-translator = load_translator()
 sdxl_l_txt2img = load_sdxl_lightning()
 #sdxl_turbo = load_sdxl_turbo()
 pix2pix_img2img = load_instruct_pix2pix()
@@ -389,38 +379,23 @@ def poll_llm(user_prompt):
         print("Error in poll_llm:", e)
     return None, None
 
-def run_whisper(audio_path, task="transcribe", language=None):
-    print("Running !" + selected_model + "! Whisper for language !" + str(language) + "! and task !" + task + "!")
+def run_whisper(audio_path, language=None):
+    print("Running !" + selected_model + "! Whisper for language !" + str(language) + "!")
     with lock:
         if "local" in selected_model:
-            if task == "translate" and not SKIP_TRANSLATION:
-                if language == "fi" and USE_OPUS_TRANSLATION:
-                    segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
-                    result_text = ' '.join([segment.text for segment in segments])
-                    result_text = translator(result_text, max_length=512)[0]['translation_text']
-                    return result_text
-
-            segments, _ = whisper_model.transcribe(audio_path, language=language, task=task, batch_size=16)
+            segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
             result_text = ' '.join([segment.text for segment in segments])
             return result_text
         if "cloud" in selected_model:
             try:
                 with open(audio_path, "rb") as audio_file:
                     client = get_llm_client(selected_model)
-                    if task == "translate" and not SKIP_TRANSLATION:
-                        response = client.audio.translations.create(
-                            model="whisper-1",
-                            file=audio_file,
-                            response_format="text"
-                        )
-                    else:
-                        response = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=audio_file,
-                            language=language,
-                            response_format="text"
-                        )
-                # Check if response is a dict or has an attribute
+                    response = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language=language,
+                        response_format="text"
+                    )
                 return response
             except Exception as e:
                 print(f"An error occurred during OpenAI Whisper processing: {e}")
@@ -429,13 +404,6 @@ def run_whisper(audio_path, task="transcribe", language=None):
         # error
         print("No whisper model selected!")
         return ""
-
-def save_concatenated_audio():
-    concatenated = AudioSegment.empty()
-    for segment in audio_segments:
-        concatenated += segment
-    concatenated.export("concatenated_audio.wav", format="wav")
-    audio_segments.clear()
 
 @socketio.on('connect')
 def handle_connect():
@@ -456,7 +424,7 @@ def handle_lang_select(data):
     emit("status", "Updated model selection!")
 
 @socketio.on("full_audio_data")
-def handle_audio_data(data):
+def handle_full_audio_data(data):
     print("Transcribing full audio data...")
     try_catch(process_full_audio, data)
 
@@ -469,20 +437,13 @@ def process_full_audio(data):
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
         return
-    result_text = run_whisper("full_audio.webm", "transcribe", transcription_language)
+    result_text = run_whisper("full_audio.webm", transcription_language)
     if result_text == "":
         emit("empty_transcription", "No audio detected, please try again.")
         emit("status", "Waiting...")
         return
     print(f"Full transcription: {result_text}")
-    emit("full_transcription", result_text)
-    result_text = run_whisper("full_audio.webm", "translate", transcription_language)
-    if result_text == "":
-        emit("empty_transcription", "No audio detected, please try again.")
-        emit("status", "Waiting...")
-        return
-    print(f"Full translation: {result_text}")
-    emit("translation", result_text)
+    emit("final_transcription_result", result_text)
 
 @socketio.on("audio_data")
 def handle_audio_data(data):
@@ -497,22 +458,33 @@ def process_transcription(data):
     with open(f"audio.wav", "wb") as f:
         f.write(decode)
 
-    result_text = run_whisper("audio.wav", "transcribe", transcription_language)
+    result_text = run_whisper("audio.wav", transcription_language)
 
     print(f"Transcription: {result_text}")
     emit("transcription", result_text)
 
-@socketio.on("translate")
-def handle_translation():
-    print("Translating audio...")
-    try_catch(process_translation)
+def save_concatenated_audio():
+    print(f"Concatenating {len(audio_segments)} audio segments...")
+    concatenated = AudioSegment.empty()
+    for segment in audio_segments:
+        concatenated += segment
+    print(f"Exporting concatenated audio ({len(concatenated)}ms)...")
+    concatenated.export("concatenated_audio.wav", format="wav")
+    print("Audio segments cleared")
+    audio_segments.clear()
 
-def process_translation():
+@socketio.on("final_transcription")
+def handle_final_transcription():
+    print("Processing final transcription...")
+    try_catch(process_final_transcription)
+
+def process_final_transcription():
+    print("Starting save_concatenated_audio...")
     save_concatenated_audio()
-    with lock:
-        result_text = run_whisper("concatenated_audio.wav", "translate", transcription_language)
-    print(f"Translation: {result_text}")
-    emit("translation", result_text)
+    print("save_concatenated_audio completed, starting transcription...")
+    result_text = run_whisper("concatenated_audio.wav", transcription_language)
+    print(f"Final transcription: {result_text}")
+    emit("final_transcription_result", result_text)
 
 @app.route("/kuvagen/process_command", methods=["POST"])
 def process_command():
@@ -624,18 +596,21 @@ def generate_image(prompt):
 
     if "local" in selected_model:
         if "fast" in selected_model or "slow" in selected_model:
+            print("Using SDXL Lightning for fast model option")
             image = sdxl_l_txt2img(
                 prompt,
                 num_inference_steps=4,
                 guidance_scale=0,
                 callback_on_step_end=progress_callback_old
             ).images[0]
-        if "veryslow" in selected_model:
-            image = flux1_txt2img(
+        if "slow" in selected_model:
+            # FLUX model not loaded, using SDXL Lightning instead
+            print("Using SDXL Lightning for slow model option")
+            image = sdxl_l_txt2img(
                 prompt,
-                num_inference_steps=4,
+                num_inference_steps=8,
                 guidance_scale=0,
-                #callback_on_step_end=progress_callback_on_step_end
+                callback_on_step_end=progress_callback_old
             ).images[0]
     if "cloud" in selected_model:
         if "openai" in CLOUD_PROVIDER:
@@ -649,18 +624,20 @@ def generate_image(prompt):
             )
             image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
         if "google" in CLOUD_PROVIDER:
-            response = GOOGLE_CLIENT.models.generate_images(
-                model='imagen-3.0-generate-002',
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    aspect_ratio="1:1",
+            response = GOOGLE_CLIENT.models.generate_content(
+                model="gemini-2.5-flash-image-preview",
+                contents=["Please generate the following image: " + prompt],
+                config=types.GenerateContentConfig(
+                    response_modalities=['Text', 'Image']
                 )
             )
-            if not response.generated_images:
+            image = None
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None:
+                    image = Image.open(io.BytesIO(part.inline_data.data))
+                    break
+            if image is None:
                 raise Exception("No edited image output in response.")
-            generated_image = response.generated_images[0]
-            image = Image.open(io.BytesIO(generated_image.image.image_bytes))
 
     image = save_image(image, prompt)
     return jsonify({"image": image, "prompt": prompt})
@@ -679,15 +656,6 @@ def edit_image(parent_image, prompt):
                 callback_on_step_end=progress_callback_old
             ).images[0]
             image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
-        if "slow2" in selected_model:
-            callback = make_optimised_callback(flux1_img2img)
-            image = flux1_img2img(
-                prompt=prompt,
-                image=image,
-                num_inference_steps=20,
-                #callback=callback,
-                #callback_steps=1
-            ).images[0]
         if "slow" in selected_model:
             callback = make_optimised_callback(sd_cosxl_img2img, frequency=21)
             image = sd_cosxl_img2img(
@@ -716,7 +684,7 @@ def edit_image(parent_image, prompt):
                 image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
         if "google" in CLOUD_PROVIDER:
             response = GOOGLE_CLIENT.models.generate_content(
-                model="gemini-2.0-flash-exp-image-generation",
+                model="gemini-2.5-flash-image-preview",
                 contents=["Please edit the image: " + prompt, image],
                 config=types.GenerateContentConfig(
                     response_modalities=['Text', 'Image']
@@ -780,7 +748,7 @@ def generate_video_from_image(parent_image, prompt):
     print("Generating video from image...")
     image = get_saved_image(parent_image)
     image = image.resize((1024, 576), Image.Resampling.LANCZOS)
-    frames = svd_xt_img2vid(
+    frames = svd_xt_img2vid( # type: ignore
         image=image,
         num_frames=14,
         decode_chunk_size=2,

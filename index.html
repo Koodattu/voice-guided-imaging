@@ -503,17 +503,9 @@
         <p>Ollama - Qwen3</p>
       </div>
 
-      <img
-        id="logo_image"
-        class="logo-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png"
-      />
+      <img id="logo_image" class="logo-image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png" />
       <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
-      <img
-        id="jr_image"
-        class="jr-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png"
-      />
+      <img id="jr_image" class="jr-image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png" />
       <h1>Voice Guided AI-Powered Imaging</h1>
 
       <div class="controls-content">
@@ -592,17 +584,6 @@
             <h3>Live Transcription</h3>
             <textarea id="transcription" class="custom-textarea" tabindex="-1"></textarea>
           </div>
-          <div id="translation_arrows">
-            <br />
-            <div class="arrow">→</div>
-            <div class="arrow">→</div>
-            <div class="arrow">→</div>
-          </div>
-          <div id="whisper_translation">
-            <h5>STT</h5>
-            <h3>Full Translation</h3>
-            <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
-          </div>
           <div id="llm_arrows">
             <br />
             <div class="arrow">→</div>
@@ -623,17 +604,12 @@
       </div>
 
       <div class="gen-image-container">
-        <img
-          id="generated_image"
-          src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp"
-        />
+        <img id="generated_image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp" />
         <div class="gen-image-buttons">
           <button id="chart_button" class="gallery_chart_button">
             <div class="text_image_div">
               <p>CHART</p>
-              <img
-                src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/tree_chart.png"
-              />
+              <img src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/tree_chart.png" />
             </div>
             <div class="spacer_div"></div>
           </button>
@@ -679,11 +655,8 @@
       const jr_image = document.getElementById("jr_image");
 
       const transcription = document.getElementById("transcription");
-      const whisper_translation = document.getElementById("whisper_translation");
-      const translation = document.getElementById("translation");
       const llm_response = document.getElementById("llm_response");
       transcription.value = "";
-      translation.value = "";
       llm_response.value = "";
       const generated_image = document.getElementById("generated_image");
       const spinner_cont = document.getElementById("spinner_container");
@@ -718,7 +691,6 @@
       let language = "en";
       let isRecording = false;
       let isSpacePressed = false;
-      let shouldTranslate = false;
       let mediaRecorderPTT;
       let chunksPTT = [];
 
@@ -761,7 +733,6 @@
             mic_status_txt.innerText = "Recording";
             if (shouldClearTranscription) {
               transcription.value = "";
-              translation.value = "";
               llm_response.value = "";
               shouldClearTranscription = false;
             }
@@ -782,17 +753,17 @@
             const wavBuffer = vad.utils.encodeWAV(audio);
             const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
             socket.emit("audio_data", base64);
-            // If we are using push-to-talk, we need to manually trigger the translation
+            // If we are using push-to-talk, we need to manually trigger the final processing
             if (rb_ptt.checked) {
               return;
             }
             lastSpeechEndTime = Date.now();
             speechTimer = setTimeout(() => {
               if (Date.now() - lastSpeechEndTime >= 3000) {
-                setLLMStage("translation");
-                system_status.innerText = "Translating...";
+                setLLMStage("processing");
+                system_status.innerText = "Processing final transcription...";
                 if (socket && socket.connected) {
-                  socket.emit("translate");
+                  socket.emit("final_transcription");
                 }
                 backendProcessing = true;
                 spinner_cont.style.display = "flex";
@@ -846,7 +817,6 @@
             mediaRecorderPTT.start();
             if (shouldClearTranscription) {
               transcription.value = "";
-              translation.value = "";
               llm_response.value = "";
               shouldClearTranscription = false;
             }
@@ -893,9 +863,9 @@
           transcription.value = (transcription.value + data).replace(".", " ").replace("  ", " ");
         });
 
-        socket.on("translation", async (data) => {
-          system_status.innerText = "Translation received";
-          translation.value = data;
+        socket.on("final_transcription_result", async (data) => {
+          system_status.innerText = "Final transcription received";
+          transcription.value = data; // Update with the final, complete transcription
           setLLMStage("llm_response");
           await processCommand(generated_image.alt, data);
         });
@@ -938,8 +908,6 @@
           }
           language = "en";
           changeBubbleText("Using Auto Language Detection");
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
-          whisper_translation.style.display = "block";
         });
         rb_en.addEventListener("change", () => {
           if (socket && socket.connected) {
@@ -947,8 +915,6 @@
           }
           language = "en";
           changeBubbleText("Now in English!");
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "none"));
-          whisper_translation.style.display = "none";
         });
         rb_fi.addEventListener("change", () => {
           if (socket && socket.connected) {
@@ -956,8 +922,6 @@
           }
           language = "fi";
           changeBubbleText("Puhumme Suomea!");
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
-          whisper_translation.style.display = "block";
         });
 
         rb_local_fast.addEventListener("change", () => {
@@ -1205,50 +1169,37 @@
           };
           const elemWid = tree_view.offsetWidth;
           const elemHei = tree_view.offsetHeight;
-          let initalZoom =
-            screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
+          let initalZoom = screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
           panzoom_element.zoomAbs(0, 0, initalZoom * 0.9);
-          panzoom_element.moveTo(
-            (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
-            (screenSize.h - elemHei * initalZoom) / 2
-          );
+          panzoom_element.moveTo((screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3, (screenSize.h - elemHei * initalZoom) / 2);
           panzoom_parent.style.opacity = 1;
         });
       }
 
       function setLLMStage(stage) {
         if (stage == "transcription") {
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
           transcription.style.borderColor = "yellow";
           transcription.style.borderWidth = "2px";
-          translation.style.borderColor = "white";
-          transcription.style.borderWidth = "1px";
           llm_response.style.borderColor = "white";
-          transcription.style.borderWidth = "1px";
-        } else if (stage == "translation") {
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "yellow"));
-          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
-          transcription.style.borderColor = "lightgreen";
-          translation.style.borderColor = "yellow";
-          llm_response.style.borderColor = "white";
-        } else if (stage == "llm_response") {
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          llm_response.style.borderWidth = "1px";
+        } else if (stage == "processing") {
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "yellow"));
           transcription.style.borderColor = "lightgreen";
-          translation.style.borderColor = "lightgreen";
+          transcription.style.borderWidth = "1px";
+          llm_response.style.borderColor = "white";
+          llm_response.style.borderWidth = "1px";
+        } else if (stage == "llm_response") {
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "yellow"));
+          transcription.style.borderColor = "lightgreen";
           llm_response.style.borderColor = "yellow";
         } else if (stage == "done") {
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
           transcription.style.borderColor = "lightgreen";
-          translation.style.borderColor = "lightgreen";
           llm_response.style.borderColor = "lightgreen";
         } else {
-          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
           document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
           transcription.style.borderColor = "white";
-          translation.style.borderColor = "white";
           llm_response.style.borderColor = "white";
         }
       }
@@ -1265,8 +1216,7 @@
           case 1:
             speechBubbleEnabled = false;
             logo_image.style.display = "none";
-            jr_image.src =
-              "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png";
+            jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png";
             processJussiRasku("init:gls");
             break;
           case 2:
@@ -1293,24 +1243,20 @@
 
       let timer = null;
       function processJussiRasku(data) {
-        let newText =
-          language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
+        let newText = language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
         if (data.startsWith("init:")) {
           const guy = data.split(":")[1];
           newText = responses[language].initReplies[guy];
         } else if (data.startsWith("create:")) {
-          newText =
-            responses[language].createReplies[Math.floor(Math.random() * responses[language].createReplies.length)];
+          newText = responses[language].createReplies[Math.floor(Math.random() * responses[language].createReplies.length)];
         } else if (data.startsWith("edit:")) {
           newText = responses[language].editReplies[Math.floor(Math.random() * responses[language].editReplies.length)];
         } else if (data.startsWith("video:")) {
-          newText =
-            responses[language].videoReplies[Math.floor(Math.random() * responses[language].videoReplies.length)];
+          newText = responses[language].videoReplies[Math.floor(Math.random() * responses[language].videoReplies.length)];
         } else if (data.startsWith("undo:")) {
           newText = responses[language].undoReplies[Math.floor(Math.random() * responses[language].undoReplies.length)];
         } else if (data.startsWith("error:")) {
-          newText =
-            responses[language].errorReplies[Math.floor(Math.random() * responses[language].errorReplies.length)];
+          newText = responses[language].errorReplies[Math.floor(Math.random() * responses[language].errorReplies.length)];
         } else if (data.startsWith("done:")) {
           newText = responses[language].doneReplies[Math.floor(Math.random() * responses[language].doneReplies.length)];
         }
@@ -1321,10 +1267,7 @@
 
         function startTimer() {
           timer = setTimeout(() => {
-            newText =
-              responses[language].createOrEditReminderReplies[
-                Math.floor(Math.random() * responses[language].createOrEditReminderReplies.length)
-              ];
+            newText = responses[language].createOrEditReminderReplies[Math.floor(Math.random() * responses[language].createOrEditReminderReplies.length)];
             changeBubbleText(newText);
             startTimer();
           }, 30000);
