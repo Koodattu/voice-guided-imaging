@@ -28,7 +28,8 @@ from diffusers import (
     FluxTransformer2DModel,
     StableDiffusionLatentUpscalePipeline,
     AutoPipelineForText2Image,
-    FluxKontextPipeline
+    FluxKontextPipeline,
+    GGUFQuantizationConfig
 )
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, login
@@ -108,15 +109,6 @@ def load_whisper_model():
     print("WHISPER model loaded successfully!")
     return BatchedInferencePipeline(model=model)
 
-# https://huggingface.co/stabilityai/sdxl-turbo
-def load_sdxl_turbo():
-    print("Loading SDXL-Turbo model...")
-    turbo = AutoPipelineForText2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=torch.float16, variant="fp16")
-    turbo.to("cuda")
-    turbo.enable_model_cpu_offload()
-    print("SDXL-Turbo model loaded successfully!")
-    return turbo
-
 # https://huggingface.co/ByteDance/SDXL-Lightning
 def load_sdxl_lightning():
     print("Loading SDXL-Lightning model...")
@@ -130,7 +122,7 @@ def load_sdxl_lightning():
     txt2img = StableDiffusionXLPipeline.from_pretrained(
         base,
         unet=unet,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         variant="fp16",
         cache_dir=CACHE_DIR
     )
@@ -142,6 +134,47 @@ def load_sdxl_lightning():
     txt2img.enable_model_cpu_offload()
     print("SDXL-Lightning model loaded successfully!")
     return txt2img
+
+# https://huggingface.co/city96/FLUX.1-dev-gguf
+def load_flux1_dev_gguf():
+    print("Loading FLUX.1-dev GGUF model...")
+    from diffusers import GGUFQuantizationConfig
+    ckpt_path = (
+        "https://huggingface.co/city96/FLUX.1-dev-gguf/blob/main/flux1-dev-Q2_K.gguf"
+    )
+    transformer = FluxTransformer2DModel.from_single_file(
+        ckpt_path,
+        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
+        torch_dtype=torch.bfloat16,
+    )
+    pipe = FluxPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-dev",
+        transformer=transformer,
+        torch_dtype=torch.bfloat16,
+    )
+    pipe.enable_model_cpu_offload()
+    print("FLUX.1-dev GGUF model loaded successfully!")
+    return pipe
+
+# https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF
+def load_flux1_kontext_dev_gguf():
+    print("Loading FLUX.1-Kontext-dev GGUF model...")
+    ckpt_path = (
+        "https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF/blob/main/flux1-kontext-dev-Q4_K_M.gguf"
+    )
+    transformer = FluxTransformer2DModel.from_single_file(
+        ckpt_path,
+        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
+        torch_dtype=torch.bfloat16,
+    )
+    pipe = FluxKontextPipeline.from_pretrained(
+        "black-forest-labs/FLUX.1-Kontext-dev",
+        transformer=transformer,
+        torch_dtype=torch.bfloat16,
+    )
+    pipe.enable_model_cpu_offload()
+    print("FLUX.1-Kontext-dev GGUF model loaded successfully!")
+    return pipe
 
 # https://huggingface.co/black-forest-labs/FLUX.1-schnell
 def load_flux1_schnell():
@@ -238,19 +271,6 @@ def load_instruct_pix2pix():
     print("Instruct-Pix2Pix model loaded successfully!")
     return pix2pix
 
-# https://huggingface.co/stabilityai/sd-x2-latent-upscaler
-def load_sd_x2_lups():
-    print("Loading SD-X2-Latent-Upscaler model...")
-    upscaler = StableDiffusionLatentUpscalePipeline.from_pretrained(
-        "stabilityai/sd-x2-latent-upscaler",
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
-    )
-    upscaler.to("cuda")
-    upscaler.enable_model_cpu_offload()
-    print("SD-X2-Latent-Upscaler model loaded successfully!")
-    return upscaler
-
 # https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
 # https://huggingface.co/stabilityai/cosxl
 def load_cosxl_edit():
@@ -331,17 +351,15 @@ print("Loading models...")
 load_ollama_llm()
 whisper_model = load_whisper_model()
 sdxl_l_txt2img = load_sdxl_lightning()
-#sdxl_turbo = load_sdxl_turbo()
 pix2pix_img2img = load_instruct_pix2pix()
 #svd_xt_img2vid = load_video_diffusion()
-
-# Experimental upscaling for Instruct-Pix2Pix
-#sd_x2_lups = load_sd_x2_lups()
 
 # Better quality but slower local models
 #flux1_txt2img = load_flux1_schnell()
 #flux1_img2img = load_flux1_kontext_dev()
 sd_cosxl_img2img = load_cosxl_edit()
+# load flux kontext gguf
+#flux1_kontext_gguf = load_flux1_kontext_dev_gguf()
 
 # Holder for whole recording
 audio_segments = []
@@ -603,7 +621,7 @@ def generate_image(prompt):
                 guidance_scale=0,
                 callback_on_step_end=progress_callback_old
             ).images[0]
-        if "slow" in selected_model:
+        elif "slow" in selected_model:
             # FLUX model not loaded, using SDXL Lightning instead
             print("Using SDXL Lightning for slow model option")
             image = sdxl_l_txt2img(
