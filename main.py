@@ -122,7 +122,7 @@ def load_sdxl_lightning():
     txt2img = StableDiffusionXLPipeline.from_pretrained(
         base,
         unet=unet,
-        dtype=torch.float16,
+        torch_dtype=torch.float16,
         variant="fp16",
         cache_dir=CACHE_DIR
     )
@@ -322,21 +322,21 @@ def load_video_diffusion():
 
 def load_ollama_llm():
     print("Loading LLM...")
-    payload = {
-        "messages": [
-            {"role": "system", "content": "You are a loader!"},
-            {"role": "user", "content": "Tell me you are loaded!"}
-        ],
-        "model": get_llm_model("local"),
-        "format": LLMOutput.model_json_schema(),
-        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20, "keep_alive": -1}
-    }
-    ollama_client = OllamaClient(
-        host='http://localhost:11434',
-        headers={'Content-Type': 'application/json'}
-    )
-    _ = ollama_client.chat(**payload)
-    print("LLM loaded successfully!")
+    messages = [
+        {"role": "system", "content": "You are a loader! You say 'I am loaded'."},
+        {"role": "user", "content": "Tell me you are loaded!"}
+    ]
+    try:
+        response = OLLAMA_CLIENT.beta.chat.completions.parse(
+            model=get_llm_model("local"),
+            messages=messages,
+            max_tokens=100,
+            response_format=LLMOutput,
+            extra_body={"num_ctx": 1280}
+        )
+        print("LLM loaded successfully!")
+    except Exception as e:
+        print(f"Error loading LLM: {e}")
 
 def periodic_ollama_loader():
     while True:
@@ -382,7 +382,7 @@ def poll_llm(user_prompt):
     try:
         extra_body = None
         if "local" in selected_model:
-            extra_body = {"num_ctx": 1280, "keep_alive": -1}
+            extra_body = {"num_ctx": 1280}
 
         response = get_llm_client(selected_model).beta.chat.completions.parse(
             model=get_llm_model(selected_model),
@@ -621,9 +621,9 @@ def generate_image(prompt):
                 guidance_scale=0,
                 callback_on_step_end=progress_callback_old
             ).images[0]
-        elif "slow" in selected_model:
+        elif "superslow" in selected_model:
             # FLUX model not loaded, using SDXL Lightning instead
-            print("Using SDXL Lightning for slow model option")
+            print("Using SDXL Lightning for superslow model option")
             image = sdxl_l_txt2img(
                 prompt,
                 num_inference_steps=8,
