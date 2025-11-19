@@ -1,0 +1,8 @@
+flask
+flask-socketio
+requests
+pydantic
+openai
+python-dotenv
+flask-cors
+google-genai

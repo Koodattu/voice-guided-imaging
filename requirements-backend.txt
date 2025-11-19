@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+torch --index-url https://download.pytorch.org/whl/cu126
+diffusers
+transformers
+accelerate
+huggingface_hub
+safetensors
+pillow
+faster-whisper
+ollama
+openai
+python-dotenv
