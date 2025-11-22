@@ -526,9 +526,9 @@ def handle_process_command(data):
     print(f"Processing command for {user_id}: {command}")
 
     try:
-        # Check user limit for create/edit actions
-        if not check_user_limit(user_id):
-            emit("command_error", "Image generation limit reached. Please log in to continue.")
+        # Check user limit for cloud models only
+        if "cloud" in selected_model and not check_user_limit(user_id):
+            emit("command_error", "Image generation limit reached for cloud models. Please log in to continue or use local models.")
             return
 
         # Get LLM response for action determination

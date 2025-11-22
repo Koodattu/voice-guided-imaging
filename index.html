@@ -1044,12 +1044,13 @@
           mediaRecorder.stop();
         }, 500);
 
-        // If we had audio data, immediately transition to processing state
+        // Immediately transition to processing state if we had audio
         if (hadAudioData) {
           backendProcessing = true;
           system_status.textContent = "Processing audio...";
+          mic_status_box.style.boxShadow = "";
         } else {
-          system_status.textContent = "Processing audio...";
+          system_status.textContent = "No audio detected";
         }
 
         mic_help.textContent = "Hold spacebar";

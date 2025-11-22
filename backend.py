@@ -229,7 +229,7 @@ async def health_check():
 @app.post("/transcribe")
 async def transcribe_audio(request: TranscribeRequest):
     """Transcribe audio using local Whisper"""
-    temp_webm = None
+    temp_audio = None
     temp_wav = None
 
     try:
@@ -237,21 +237,33 @@ async def transcribe_audio(request: TranscribeRequest):
         audio_data = base64.b64decode(request.audio_base64)
 
         # Save temporarily in temp_audio directory
-        temp_webm = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.webm")
-        temp_wav = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
+        # Try to detect format - if it's already WAV, use it directly
+        temp_audio = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
 
-        with open(temp_webm, "wb") as f:
+        with open(temp_audio, "wb") as f:
             f.write(audio_data)
 
-        # Convert webm to wav for Whisper
-        audio = AudioSegment.from_file(temp_webm, format="webm")
+        # Try to load the audio - it might be WAV or webm
+        try:
+            audio = AudioSegment.from_file(temp_audio, format="wav")
+        except:
+            # If WAV fails, try webm
+            os.remove(temp_audio)
+            temp_audio = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.webm")
+            with open(temp_audio, "wb") as f:
+                f.write(audio_data)
+            audio = AudioSegment.from_file(temp_audio, format="webm")
 
         # Check audio length
         if len(audio) < 500:  # Reduced from 2000ms to 500ms for partial transcriptions
             return {"transcription": "", "error": "Audio too short"}
 
-        # Export to wav
-        audio.export(temp_wav, format="wav")
+        # Convert to wav if needed
+        if not temp_audio.endswith('.wav'):
+            temp_wav = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
+            audio.export(temp_wav, format="wav")
+        else:
+            temp_wav = temp_audio
 
         # Transcribe with lock
         with whisper_lock:
@@ -263,6 +275,7 @@ async def transcribe_audio(request: TranscribeRequest):
             )
             result_text = ' '.join([segment.text for segment in segments])
 
+        print(f"Partial transcription result: '{result_text}'")
         return {"transcription": result_text}
 
     except Exception as e:
@@ -271,12 +284,12 @@ async def transcribe_audio(request: TranscribeRequest):
 
     finally:
         # Cleanup temp files
-        if temp_webm and os.path.exists(temp_webm):
+        if temp_audio and os.path.exists(temp_audio):
             try:
-                os.remove(temp_webm)
+                os.remove(temp_audio)
             except Exception as e:
-                print(f"Error removing temp webm: {e}")
-        if temp_wav and os.path.exists(temp_wav):
+                print(f"Error removing temp audio: {e}")
+        if temp_wav and temp_wav != temp_audio and os.path.exists(temp_wav):
             try:
                 os.remove(temp_wav)
             except Exception as e:
@@ -558,8 +571,8 @@ def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: st
                 'progress': progress_data
             }, room=session_id))
 
-        # Generate preview every 2 steps
-        if step % 2 == 0:
+        # Generate preview every 22 steps
+        if step % 22 == 0:
             try:
                 with torch.no_grad():
                     latents_scaled = (1 / 0.18215) * latents
