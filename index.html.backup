@@ -8,6 +8,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- frontend backend communication -->
     <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    <!-- ort is required by vad -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+    <!-- vad for audio recording -->
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad/dist/index.browser.js"></script>
     <!-- font awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" />
     <!-- speech bubble font -->
@@ -39,7 +43,7 @@
         flex-direction: column;
         align-items: center;
         height: 100%;
-        width: calc(100% - 725px);
+        width: calc(100% - 525px);
       }
 
       #spinner_container {
@@ -68,41 +72,6 @@
         100% {
           transform: rotate(360deg);
         }
-      }
-
-      #connection_overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(7, 8, 21, 0.95);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        gap: 30px;
-      }
-
-      #connection_overlay.hidden {
-        display: none;
-      }
-
-      .connection-spinner {
-        border: 8px solid rgba(255, 255, 255, 0.2);
-        border-radius: 50%;
-        border-top: 8px solid #3498db;
-        width: 80px;
-        height: 80px;
-        animation: spin 1s linear infinite;
-      }
-
-      .connection-message {
-        font-size: 1.5rem;
-        color: white;
-        font-weight: 500;
-        text-align: center;
       }
 
       h1 {
@@ -207,7 +176,7 @@
 
       #generated_image {
         object-fit: contain;
-        height: calc(100vh - 400px);
+        height: calc(100vh - 425px);
         width: auto;
         border-radius: 8px;
       }
@@ -252,155 +221,6 @@
 
       .font-bold {
         font-weight: 600;
-      }
-
-      .gen-image-buttons {
-        position: absolute;
-        display: flex;
-        width: 100%;
-        height: 100%;
-      }
-
-      .gallery_chart_button {
-        position: relative;
-        width: 50%;
-        border: none;
-        padding: 10px;
-        background: transparent;
-        border-radius: 8px;
-        cursor: pointer;
-        opacity: 0.25;
-        color: white;
-        font-size: 2.5rem;
-        font-weight: bold;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .gallery_chart_button:hover {
-        opacity: 0.75;
-        background: rgba(255, 255, 255, 0.25);
-      }
-
-      .gallery_chart_button .text_image_div {
-        width: 45%;
-      }
-
-      .gallery_chart_button .spacer_div {
-        width: 55%;
-      }
-
-      .gallery_chart_button img {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: cover;
-        transform: rotate(-90deg);
-        filter: brightness(0) invert(1);
-        opacity: 0.75;
-      }
-
-      .gallery {
-        padding: 10px;
-        display: none;
-        flex-wrap: wrap;
-        justify-content: space-around;
-      }
-
-      .gallery .image-container {
-        position: relative;
-        margin: 5px;
-        flex: 1 1 calc(20% - 10px);
-        text-align: center;
-        box-sizing: border-box;
-      }
-      .gallery .image-container img {
-        width: 100%;
-        height: auto;
-        display: block;
-      }
-      .gallery .overlay {
-        position: absolute;
-        bottom: 5%;
-        left: 50%;
-        color: white;
-        background-color: rgba(0, 0, 0, 0.5);
-        padding: 5px;
-        transform: translate(-50%, -50%);
-        pointer-events: none;
-      }
-      .gallery img:hover {
-        cursor: pointer;
-        filter: brightness(1.1);
-        transform: scale(1.025);
-        transition: all 0.25s ease-in-out;
-      }
-      .gallery .download-btn {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        border: none;
-        padding: 8px 12px;
-        border-radius: 4px;
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity 0.2s;
-      }
-
-      .gallery .image-container:hover .download-btn {
-        opacity: 1;
-      }
-      @media (max-width: 1600px) {
-        .gallery .image-container {
-          flex: 1 1 calc(25% - 10px);
-        }
-      }
-      @media (max-width: 1200px) {
-        .gallery .image-container {
-          flex: 1 1 calc(33.333% - 10px);
-        }
-      }
-      @media (max-width: 800px) {
-        .gallery .image-container {
-          flex: 1 1 calc(50% - 10px);
-        }
-      }
-      @media (max-width: 500px) {
-        .gallery .image-container {
-          flex: 1 1 calc(100% - 10px);
-        }
-      }
-
-      #panzoom_parent {
-        display: none;
-      }
-
-      .node {
-        position: absolute;
-      }
-
-      .node img {
-        width: 100px;
-        height: 100px;
-      }
-
-      .node img:hover {
-        cursor: pointer;
-        filter: brightness(1.1);
-        transform: scale(1.025);
-        transition: all 0.25s ease-in-out;
-      }
-      .node p {
-        font-size: 8px;
-        line-height: 10px;
-        font-weight: bold;
-        padding: 3px;
-        border: 2px solid white;
-        background: #070815;
-        width: 48px;
       }
 
       .logo-image {
@@ -465,15 +285,222 @@
         clip-path: polygon(0% 49%, 150% 48%, 150% 100%, 0% 100%);
         transform: rotate(-3deg);
       }
+
+      .gallery {
+        padding: 10px;
+        display: none;
+        flex-wrap: wrap;
+        justify-content: space-around;
+      }
+      .gallery .image-container {
+        position: relative;
+        margin: 5px;
+        flex: 1 1 calc(20% - 10px);
+        text-align: center;
+        box-sizing: border-box;
+      }
+      .gallery .image-container img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .gallery .overlay {
+        position: absolute;
+        bottom: 5%;
+        left: 50%;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 5px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      .gallery img:hover {
+        cursor: pointer;
+        filter: brightness(1.1);
+        transform: scale(1.025);
+        transition: all 0.25s ease-in-out;
+      }
+      @media (max-width: 1600px) {
+        .gallery .image-container {
+          flex: 1 1 calc(25% - 10px);
+        }
+      }
+      @media (max-width: 1200px) {
+        .gallery .image-container {
+          flex: 1 1 calc(33.333% - 10px);
+        }
+      }
+      @media (max-width: 800px) {
+        .gallery .image-container {
+          flex: 1 1 calc(50% - 10px);
+        }
+      }
+      @media (max-width: 500px) {
+        .gallery .image-container {
+          flex: 1 1 calc(100% - 10px);
+        }
+      }
+
+      #panzoom_parent {
+        display: none;
+      }
+
+      .node {
+        position: absolute;
+      }
+
+      .node img {
+        width: 100px;
+        height: 100px;
+      }
+
+      .node img:hover {
+        cursor: pointer;
+        filter: brightness(1.1);
+        transform: scale(1.025);
+        transition: all 0.25s ease-in-out;
+      }
+      .node p {
+        font-size: 8px;
+        line-height: 10px;
+        font-weight: bold;
+        padding: 3px;
+        border: 2px solid white;
+        background: #070815;
+        width: 48px;
+      }
+
+      .gen-image-buttons {
+        position: absolute;
+        display: flex;
+        width: 100%;
+        height: 100%;
+      }
+
+      .gallery_chart_button .text_image_div {
+        width: 45%;
+      }
+
+      .gallery_chart_button .spacer_div {
+        width: 55%;
+      }
+
+      .gallery_chart_button {
+        position: relative;
+        width: 50%;
+        border: none;
+        padding: 10px;
+        background: transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        opacity: 0.25;
+        color: white;
+        font-size: 2.5rem;
+        font-weight: bold;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .gallery_chart_button:hover {
+        opacity: 0.75;
+        background: rgba(255, 255, 255, 0.25);
+      }
+
+      .gallery_chart_button img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: cover;
+        transform: rotate(-90deg);
+        filter: brightness(0) invert(1);
+        opacity: 0.75;
+      }
+
+      .info-box {
+        position: absolute;
+        width: 200px;
+        height: 175px;
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        border-radius: 8px;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 8px;
+      }
+
+      .box-top-left {
+        top: 300px;
+        left: 10px;
+      }
+
+      .box-top-left-two {
+        top: 40px;
+        left: 10px;
+        width: 380px;
+        height: 225px;
+      }
+
+      .box-top-right {
+        top: 10px;
+        right: 10px;
+      }
+
+      #toggle-boxes {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 10;
+        color: white;
+      }
     </style>
   </head>
   <body id="body">
-    <!--
-    <div id="connection_overlay">
-      <div class="connection-spinner"></div>
-      <div class="connection-message">Waiting for connection...</div>
-    </div>-->
     <div class="main-page" id="main_page">
+      <div id="toggle-boxes">
+        <label>
+          <input type="checkbox" id="toggleCheckbox" />
+          Toggle Info Boxes
+        </label>
+      </div>
+
+      <div class="info-box box-top-left" id="boxTopLeft" style="display: none">
+        <p>Ideoita:</p>
+        <p>Luo minulle uusi kuva...</p>
+        <p>Tee uusi kuva jossa...</p>
+        <p>Muokkaa tätä kuvaa...</p>
+        <p>Mitä jos kuvassa...</p>
+        <p>Lisää kuvaan...</p>
+        <p>Mene takaisin edelliseen...</p>
+        <p>Tee tästä kuvasta video...</p>
+      </div>
+
+      <div class="info-box box-top-left-two" id="boxTopLeftTwo" style="display: none">
+        <p>Käsikirjoitus:</p>
+        <p>Valitse Finnish ja Local</p>
+        <p>Välilyönti pohjaan, anna komento mikrofoniin, vapauta välilyönti</p>
+        <p>1. Luo minulle uusi kuva jossa on kissa</p>
+        <p>2. Muokkaa kuvaa lisäämällä kissalle aurinkolasit</p>
+        <p>3. Luo minulle uusi kuva järvimaisemasta</p>
+        <p>4. Lisää kuvaan kaunis auringonlasku</p>
+        <p>5. Mennään takaisin edelliseen kuvaan</p>
+        <p>6. Mitä jos kuvassa olisikin yö?</p>
+        <p>Vaihda Cloud ja toista ylemmät kuusi kohtaa</p>
+      </div>
+
+      <div class="info-box box-top-right" id="boxTopRight" style="display: none">
+        <p>Python</p>
+        <p>OpenAI Whisper</p>
+        <p>OPUS MT</p>
+        <p>SDXL-Lightning</p>
+        <p>Instruct-Pix2Pix</p>
+        <p>Stable Video Diffusion</p>
+        <p>Ollama</p>
+        <p>Qwen3</p>
+      </div>
+
       <img id="logo_image" class="logo-image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png" />
       <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
       <img id="jr_image" class="jr-image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png" />
@@ -490,6 +517,21 @@
                 <p id="mic_status_txt" class="font-bold">Muted</p>
               </div>
               <label id="mic_help" style="margin: 4px">Hold spacebar</label>
+            </div>
+          </div>
+        </div>
+        <div class="input-container height-50">
+          <div class="flex-center">
+            <h3>Behaviour:&nbsp;</h3>
+            <div class="flex-vertical">
+              <div>
+                <input class="rb-input" type="radio" id="rb_ptt" name="rb_mode" checked="true" />
+                <label for="rb_ptt">Push-to-Talk</label>
+              </div>
+              <div>
+                <input class="rb-input" type="radio" id="rb_vad" name="rb_mode" />
+                <label for="rb_vad">Voice Activity</label>
+              </div>
             </div>
           </div>
         </div>
@@ -517,16 +559,16 @@
             <h3>Models:&nbsp;</h3>
             <div class="flex-vertical">
               <div>
-                <input class="rb-input" type="radio" id="rb_cloud" name="rb_model" checked="true" />
+                <input class="rb-input" type="radio" id="rb_local_fast" name="rb_model" checked="true" />
+                <label for="rb_local_fast">Local (Fast)</label>
+              </div>
+              <div>
+                <input class="rb-input" type="radio" id="rb_local_slow" name="rb_model" />
+                <label for="rb_local_slow">Local (Slow)</label>
+              </div>
+              <div>
+                <input class="rb-input" type="radio" id="rb_cloud" name="rb_model" />
                 <label for="rb_cloud">Cloud</label>
-              </div>
-              <div>
-                <input class="rb-input" type="radio" id="rb_local_fast" name="rb_model" disabled />
-                <label for="rb_local_fast">Local (Fast Edits)</label>
-              </div>
-              <div>
-                <input class="rb-input" type="radio" id="rb_local_slow" name="rb_model" disabled />
-                <label for="rb_local_slow">Local (Better Edits)</label>
               </div>
             </div>
           </div>
@@ -536,17 +578,31 @@
       <div class="textareas-container">
         <div class="container">
           <div>
-            <h5>Transcription</h5>
-            <textarea id="transcription" class="custom-textarea"></textarea>
+            <h5>STT</h5>
+            <h3>Live Transcription</h3>
+            <textarea id="transcription" class="custom-textarea" tabindex="-1"></textarea>
+          </div>
+          <div id="translation_arrows">
+            <br />
+            <div class="arrow">→</div>
+            <div class="arrow">→</div>
+            <div class="arrow">→</div>
+          </div>
+          <div id="whisper_translation">
+            <h5>STT</h5>
+            <h3>Full Translation</h3>
+            <textarea id="translation" class="custom-textarea" tabindex="-1"></textarea>
           </div>
           <div id="llm_arrows">
-            <h5>→</h5>
-            <h5>→</h5>
-            <h5>→</h5>
+            <br />
+            <div class="arrow">→</div>
+            <div class="arrow">→</div>
+            <div class="arrow">→</div>
           </div>
           <div>
-            <h5>Action & Prompt</h5>
-            <textarea id="llm_response" class="custom-textarea"></textarea>
+            <h5>LLM</h5>
+            <h3>Inferred Action</h3>
+            <textarea id="llm_response" class="custom-textarea" tabindex="-1"></textarea>
           </div>
         </div>
       </div>
@@ -557,11 +613,11 @@
       </div>
 
       <div class="gen-image-container">
-        <img id="generated_image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp" alt="" />
+        <img id="generated_image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp" />
         <div class="gen-image-buttons">
           <button id="chart_button" class="gallery_chart_button">
             <div class="text_image_div">
-              <p>TREE</p>
+              <p>CHART</p>
               <img src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/tree_chart.png" />
             </div>
             <div class="spacer_div"></div>
@@ -603,19 +659,16 @@
           y: e.clientY / window.innerHeight,
         });
       };
-      body.onmousemove = (e) => {
-        panzoom_element.setTransformOrigin({
-          x: e.clientX / window.innerWidth - 0.3,
-          y: e.clientY / window.innerHeight,
-        });
-      };
 
       const logo_image = document.getElementById("logo_image");
       const jr_image = document.getElementById("jr_image");
 
       const transcription = document.getElementById("transcription");
+      const whisper_translation = document.getElementById("whisper_translation");
+      const translation = document.getElementById("translation");
       const llm_response = document.getElementById("llm_response");
       transcription.value = "";
+      translation.value = "";
       llm_response.value = "";
       const generated_image = document.getElementById("generated_image");
       const spinner_cont = document.getElementById("spinner_container");
@@ -634,456 +687,393 @@
       const rb_local_slow = document.getElementById("rb_local_slow");
       const rb_cloud = document.getElementById("rb_cloud");
 
+      const rb_ptt = document.getElementById("rb_ptt");
+      const rb_vad = document.getElementById("rb_vad");
+
       const gallery_button = document.getElementById("gallery_button");
       const chart_button = document.getElementById("chart_button");
 
-      // State
-      let socket = null;
-      let isRecording = false;
-      let isSpacePressed = false;
+      let ignoreScroll = true;
       let backendProcessing = false;
       let shouldClearTranscription = false;
-      let mediaRecorder = null;
-      let audioChunks = [];
-      let sessionInfo = {};
-      let displayedImages = new Set();
-      let language = "";
-      let speechBubbleEnabled = false;
-      let selectedModel = "cloud";
-      let hasAudioData = false; // Track if actual audio data is being captured
-      let userId = null; // User ID stored in localStorage
-      let audioContext = null;
-      let analyser = null;
-      let audioLevelCheckInterval = null;
+      let speechTimer;
+      let lastSpeechEndTime = 0;
+      let myvad = null;
+      let socket = null;
+      let language = "en";
+      let isRecording = false;
+      let isSpacePressed = false;
+      let shouldTranslate = false;
+      let mediaRecorderPTT;
+      let chunksPTT = [];
 
-      // Get or create user ID from localStorage
-      function getUserId() {
-        let storedUserId = localStorage.getItem("voice_imaging_user_id");
-        if (!storedUserId) {
-          // Generate a new random user ID
-          storedUserId = "user_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-          localStorage.setItem("voice_imaging_user_id", storedUserId);
-        }
-        return storedUserId;
-      }
-
-      // Initialize
-      document.addEventListener("DOMContentLoaded", async () => {
-        userId = getUserId(); // Get or create user ID first
-        await loadSessionInfo();
-        initializeSocket();
-        initializeMicrophone();
-        updateGallery();
-        updateMicStatus(); // Initialize mic status display
-
-        // Send initial language and model selections to server
-        // Wait a bit for socket to connect
-        setTimeout(() => {
-          if (socket && socket.connected) {
-            socket.emit("user_id", userId); // Send user ID to server
-            socket.emit("lang_select", ""); // Auto language
-            socket.emit("mdl_select", selectedModel); // Use the selected model from session info
-          }
-        }, 500);
+      document.getElementById("toggleCheckbox").addEventListener("change", (event) => {
+        const displayValue = event.target.checked ? "flex" : "none";
+        document.getElementById("boxTopLeft").style.display = displayValue;
+        document.getElementById("boxTopLeftTwo").style.display = displayValue;
+        document.getElementById("boxTopRight").style.display = displayValue;
       });
 
-      async function loadSessionInfo() {
-        try {
-          const response = await fetch("/kuvagen/api/session_info", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user_id: userId }),
-          });
-          sessionInfo = await response.json();
+      rb_ptt.addEventListener("change", () => {
+        isRecording = false;
+        myvad.pause();
+        mic_help.innerText = "Hold spacebar";
+        updateMicStatusStyle();
+      });
 
-          // Update UI based on backend availability from session info
-          if (sessionInfo.backend_available) {
-            rb_local_fast.disabled = false;
-            rb_local_slow.disabled = false;
+      rb_vad.addEventListener("change", () => {
+        isRecording = true;
+        myvad.start();
+        mic_help.innerText = "Start speaking";
+        updateMicStatusStyle();
+      });
 
-            // Set default model based on what backend returned
-            if (sessionInfo.default_model === "localslow") {
-              rb_local_slow.checked = true;
-              selectedModel = "localslow";
-            } else if (sessionInfo.default_model === "localfast") {
-              rb_local_fast.checked = true;
-              selectedModel = "localfast";
-            } else {
-              rb_cloud.checked = true;
-              selectedModel = "cloud";
+      async function startMicVAD(mediaStream) {
+        console.log("Starting microphone with VAD");
+        myvad = await vad.MicVAD.new({
+          mediaStream,
+          positiveSpeechThreshold: 0.8,
+          negativeSpeechThreshold: 0.6,
+          minSpeechFrames: 1,
+          preSpeechPadFrames: 5,
+          redemptionFrames: 3,
+          onSpeechStart: () => {
+            console.log("Speech start");
+            if (!isRecording || backendProcessing) {
+              return;
             }
-          } else {
-            rb_local_fast.disabled = true;
-            rb_local_slow.disabled = true;
-            if (rb_local_fast.checked || rb_local_slow.checked) {
-              rb_cloud.checked = true;
-              selectedModel = "cloud";
+            mic_status_box.style.boxShadow = "0 0 5px 5px lightgreen";
+            mic_status_txt.innerText = "Recording";
+            if (shouldClearTranscription) {
+              transcription.value = "";
+              translation.value = "";
+              llm_response.value = "";
+              shouldClearTranscription = false;
             }
-          }
-        } catch (error) {
-          console.error("Error loading session info:", error);
-          // On error, disable local options
-          rb_local_fast.disabled = true;
-          rb_local_slow.disabled = true;
-        }
+            setLLMStage("transcription");
+            clearTimeout(speechTimer);
+          },
+          onSpeechEnd: (audio) => {
+            console.log("Speech end");
+            if (!isRecording || backendProcessing) {
+              return;
+            }
+            mic_status_box.style.boxShadow = "";
+            updateMicStatusStyle();
+            // In case the socket is disconnected, we don't want to send the audio data
+            if (!socket || !socket.connected) {
+              return;
+            }
+            const wavBuffer = vad.utils.encodeWAV(audio);
+            const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
+            socket.emit("audio_data", base64);
+            // If we are using push-to-talk, we need to manually trigger the translation
+            if (rb_ptt.checked) {
+              return;
+            }
+            lastSpeechEndTime = Date.now();
+            speechTimer = setTimeout(() => {
+              if (Date.now() - lastSpeechEndTime >= 3000) {
+                setLLMStage("translation");
+                system_status.innerText = "Translating...";
+                if (socket && socket.connected) {
+                  socket.emit("translate");
+                }
+                backendProcessing = true;
+                spinner_cont.style.display = "flex";
+                updateMicStatusStyle();
+              }
+            }, 3000);
+          },
+        });
       }
 
-      function initializeSocket() {
+      async function startMicPTTandVAD() {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            autoGainControl: false,
+            noiseCancellation: false,
+          },
+          video: false,
+        });
+        await startMicVAD(mediaStream);
+
+        console.log("Starting microphone with PTT");
+        mediaRecorderPTT = new MediaRecorder(mediaStream);
+        mediaRecorderPTT.ondataavailable = function (e) {
+          chunksPTT.push(e.data);
+        };
+
+        mediaRecorderPTT.onstop = function (e) {
+          const blob = new Blob(chunksPTT, { type: "audio/webm" });
+          chunksPTT = [];
+          const reader = new FileReader();
+          reader.readAsArrayBuffer(blob);
+          reader.onloadend = function () {
+            const arrayBuffer = reader.result;
+            const base64 = vad.utils.arrayBufferToBase64(arrayBuffer);
+            socket.emit("full_audio_data", base64);
+          };
+        };
+
+        document.body.onkeydown = function (e) {
+          if (e.code === "Space" && rb_ptt.checked && !backendProcessing) {
+            console.log("Spacebar pressed");
+            e.preventDefault();
+            if (isSpacePressed) {
+              return;
+            }
+            isSpacePressed = true;
+            isRecording = true;
+            updateMicStatusStyle();
+            myvad.start();
+            mediaRecorderPTT.start();
+            if (shouldClearTranscription) {
+              transcription.value = "";
+              translation.value = "";
+              llm_response.value = "";
+              shouldClearTranscription = false;
+            }
+          }
+        };
+
+        document.body.onkeyup = function (e) {
+          if (e.code === "Space" && rb_ptt.checked && !backendProcessing) {
+            console.log("Spacebar released");
+            e.preventDefault();
+            isSpacePressed = false;
+            isRecording = false;
+            updateMicStatusStyle();
+            myvad.pause();
+            setTimeout(() => {
+              mediaRecorderPTT.stop();
+            }, 500);
+          }
+        };
+      }
+
+      document.addEventListener("DOMContentLoaded", (event) => {
+        updateMicStatusStyle();
+        //socket = io();
         socket = io({ path: "/kuvagen/socket.io" });
 
         socket.on("connect", () => {
           console.log("Connected to server");
-          system_status.textContent = "Connected! Ready to go!";
-          // Hide connection overlay
-          const connectionOverlay = document.getElementById("connection_overlay");
-          connectionOverlay.classList.add("hidden");
-        });
-
-        socket.on("disconnect", () => {
-          console.log("Disconnected from server");
-          system_status.textContent = "Disconnected from server";
-          // Show connection overlay again
-          const connectionOverlay = document.getElementById("connection_overlay");
-          connectionOverlay.classList.remove("hidden");
-        });
-
-        socket.on("status", (data) => {
-          console.log("Status:", data);
-          system_status.textContent = data;
+          system_status.innerText = "Connected to server! Ready to go!";
         });
 
         socket.on("empty_transcription", (data) => {
-          system_status.textContent = data;
-          backendProcessing = false;
-          shouldClearTranscription = true;
-          updateMicStatus();
+          system_status.innerText = "Empty transcription received";
+          setLLMStage("reset");
         });
 
-        socket.on("transcription", (text) => {
-          // Partial transcription - append to existing text
-          if (transcription.value) {
-            transcription.value += " " + text;
-          } else {
-            transcription.value = text;
-          }
-        });
-
-        socket.on("final_transcription_result", async (data) => {
+        socket.on("full_transcription", (data) => {
+          system_status.innerText = "Full transcription received";
           transcription.value = data;
+        });
+
+        socket.on("transcription", (data) => {
+          system_status.innerText = "Transcription received";
+          transcription.value = (transcription.value + data).replace(".", " ").replace("  ", " ");
+        });
+
+        socket.on("translation", async (data) => {
+          system_status.innerText = "Translation received";
+          translation.value = data;
+          setLLMStage("llm_response");
           await processCommand(generated_image.alt, data);
         });
 
-        socket.on("llm_response", (data) => {
-          llm_response.value = data;
+        socket.on("llm_response", async (data) => {
+          system_status.innerText = "LLM response received";
+          setLLMStage("done");
           processJussiRasku(data);
+          llm_response.value = data;
         });
 
-        socket.on("command_result", async (result) => {
-          if (result.image) {
-            generated_image.src = `/kuvagen/images/${result.image}`;
-            generated_image.alt = result.image;
-            system_status.textContent = "Done! Ready for next command.";
-            await loadSessionInfo();
-            if (!result.action || result.action !== "undo") {
-              processJussiRasku("done:");
-            }
-          }
-          backendProcessing = false;
-          shouldClearTranscription = true;
-          updateMicStatus();
-          spinner_cont.style.display = "none";
-          updateGallery();
+        socket.on("status", (data) => {
+          console.log("Status: " + data);
+          system_status.innerText = data;
         });
 
-        socket.on("command_error", (error) => {
-          system_status.textContent = "Error: " + error;
+        socket.on("error", (data) => {
+          console.log("Error: " + data);
+          system_status.innerText = data;
           processJussiRasku("error:");
           backendProcessing = false;
           shouldClearTranscription = true;
-          updateMicStatus();
+          updateMicStatusStyle();
+          setLLMStage("reset");
           spinner_cont.style.display = "none";
-        });
-
-        socket.on("generation_progress", (data) => {
-          system_status.textContent = `Generating... ${data.progress}%`;
-        });
-
-        socket.on("generation_preview", (data) => {
-          if (data.preview) {
-            generated_image.src = `data:image/png;base64,${data.preview}`;
-          }
         });
 
         socket.on("image_progress", (data) => {
           generated_image.src = "data:image/png;base64," + data;
         });
 
-        socket.on("error", (data) => {
-          console.error("Error:", data);
-          system_status.textContent = data;
-          processJussiRasku("error:");
-          backendProcessing = false;
-          shouldClearTranscription = true;
-          updateMicStatus();
-          spinner_cont.style.display = "none";
+        socket.on("disconnect", () => {
+          console.log("Disconnected from server");
+          system_status.innerText = "Disconnected from server";
         });
-      }
 
-      async function initializeMicrophone() {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: false,
-              autoGainControl: false,
-              noiseCancellation: false,
-            },
-          });
+        rb_auto.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("lang_select", "");
+          }
+          language = "en";
+          changeBubbleText("Using Auto Language Detection");
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
+          whisper_translation.style.display = "block";
+        });
+        rb_en.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("lang_select", "en");
+          }
+          language = "en";
+          changeBubbleText("Now in English!");
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "none"));
+          whisper_translation.style.display = "none";
+        });
+        rb_fi.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("lang_select", "fi");
+          }
+          language = "fi";
+          changeBubbleText("Puhumme Suomea!");
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.display = "block"));
+          whisper_translation.style.display = "block";
+        });
 
-          // Set up AudioContext for real-time audio level detection
-          audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          const source = audioContext.createMediaStreamSource(stream);
-          source.connect(analyser);
+        rb_local_fast.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("mdl_select", "localfast");
+          }
+        });
+        rb_local_slow.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("mdl_select", "localslow");
+          }
+        });
+        rb_cloud.addEventListener("change", () => {
+          if (socket && socket.connected) {
+            socket.emit("mdl_select", "cloud");
+          }
+        });
 
-          mediaRecorder = new MediaRecorder(stream);
+        generated_image.removeEventListener("click", () => {
+          showGallery();
+        });
+        gallery_button.addEventListener("click", () => {
+          showGallery();
+        });
+        chart_button.addEventListener("click", () => {
+          showTreeView(generated_image.alt);
+        });
 
-          mediaRecorder.ondataavailable = (e) => {
-            audioChunks.push(e.data);
+        startMicPTTandVAD();
+      });
 
-            // Send partial transcription during recording
-            if (isRecording && e.data.size > 0) {
-              const reader = new FileReader();
-              reader.readAsDataURL(e.data);
-              reader.onloadend = () => {
-                const base64 = reader.result.split(",")[1];
-                socket.emit("partial_audio_data", base64);
-              };
-            }
-          };
-
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(audioChunks, { type: "audio/webm" });
-            audioChunks = [];
-
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-              const base64 = reader.result.split(",")[1];
-              socket.emit("full_audio_data", base64);
-            };
-          };
-
-          // Keyboard controls
-          document.body.onkeydown = (e) => {
-            if (e.code === "Space" && !backendProcessing && !isSpacePressed) {
-              e.preventDefault();
-              startRecording();
-            }
-          };
-
-          document.body.onkeyup = (e) => {
-            if (e.code === "Space" && !backendProcessing && isSpacePressed) {
-              e.preventDefault();
-              stopRecording();
-            }
-          };
-        } catch (error) {
-          console.error("Microphone error:", error);
-          system_status.textContent = "Microphone access denied";
+      async function processCommand(image, command) {
+        backendProcessing = true;
+        updateMicStatusStyle();
+        spinner_cont.style.display = "flex";
+        system_status.innerText = "Processing command...";
+        const response = await fetch("/kuvagen/process_command", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ image, command }),
+        });
+        const json = await response.json();
+        if (json.error) {
+          system_status.innerText = "Unknown: " + json.unknown;
+          processJussiRasku("unknown:");
+        } else {
+          generated_image.src = `/kuvagen/images/${json.image}`;
+          generated_image.alt = json.image;
+          system_status.innerText = "Done! Waiting for input...";
+          if (!json.action || json.action !== "undo") {
+            processJussiRasku("done:");
+          }
         }
+        backendProcessing = false;
+        shouldClearTranscription = true;
+        updateMicStatusStyle();
+        setLLMStage("reset");
+        spinner_cont.style.display = "none";
+        updateGallery();
       }
 
-      function startRecording() {
-        if (isSpacePressed) return;
-
-        isSpacePressed = true;
-        isRecording = true;
-        hasAudioData = false; // Reset audio data flag
-
-        if (shouldClearTranscription) {
-          transcription.value = "";
-          llm_response.value = "";
-          shouldClearTranscription = false;
-        }
-
-        audioChunks = [];
-        // Start with timeslice of 1000ms for partial transcriptions
-        mediaRecorder.start(1000);
-        system_status.textContent = "Recording...";
-        mic_help.textContent = "Release spacebar";
-
-        // Start real-time audio level monitoring
-        startAudioLevelMonitoring();
-
-        // Update status (no glow until audio detected)
-        updateMicStatus();
-      }
-
-      function stopRecording() {
-        isSpacePressed = false;
-        isRecording = false;
-        hasAudioData = false; // Reset audio data flag
-
-        // Stop audio level monitoring
-        stopAudioLevelMonitoring();
-
-        mediaRecorder.stop();
-        system_status.textContent = "Processing audio...";
-        mic_help.textContent = "Hold spacebar";
-
-        // Update status and remove visual feedback
-        updateMicStatus();
-      }
-
-      function updateMicStatus() {
+      function updateMicStatusStyle() {
         const mic_icon_closed = document.getElementById("mic_icon_closed");
         const mic_icon_open = document.getElementById("mic_icon_open");
         let status = "Unknown";
-
-        // Reset styles
         mic_status_box.style = "";
-
         if (backendProcessing) {
           status = "Processing";
-          // Remove box shadow during processing
-          mic_status_box.style.boxShadow = "";
         } else if (isRecording) {
           status = "Listening";
-          // Only add reactive box shadow when actual audio is detected
-          if (hasAudioData) {
-            mic_status_box.style.boxShadow = "0 0 5px 5px lightgreen";
-          } else {
-            mic_status_box.style.boxShadow = "";
-          }
         } else {
           status = "Muted";
-          // Remove box shadow when muted
-          mic_status_box.style.boxShadow = "";
         }
-
         mic_status_txt.innerText = status;
         if (status === "Listening") {
-          mic_status_box.style.borderColor = "lightgreen";
           mic_status_box.style.color = "lightgreen";
+          mic_status_box.style.borderColor = "lightgreen";
           mic_icon_closed.style.display = "none";
           mic_icon_open.style.display = "block";
         } else if (status === "Muted") {
-          mic_status_box.style.borderColor = "lightcoral";
           mic_status_box.style.color = "lightcoral";
+          mic_status_box.style.borderColor = "lightcoral";
           mic_icon_closed.style.display = "block";
           mic_icon_open.style.display = "none";
         } else {
-          mic_status_box.style.borderColor = "yellow";
           mic_status_box.style.color = "yellow";
+          mic_status_box.style.borderColor = "yellow";
           mic_icon_closed.style.display = "block";
           mic_icon_open.style.display = "none";
         }
       }
 
-      function startAudioLevelMonitoring() {
-        if (!analyser) return;
+      const displayedImages = new Set();
 
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        const audioThreshold = 25; // Adjust this value to change sensitivity (lower = more sensitive)
+      document.addEventListener("DOMContentLoaded", function () {
+        updateGallery();
+      });
 
-        audioLevelCheckInterval = setInterval(() => {
-          if (!isRecording) {
-            stopAudioLevelMonitoring();
-            return;
-          }
+      function updateGallery() {
+        fetch("/kuvagen/images")
+          .then((response) => response.json())
+          .then((images) => {
+            const gallery = document.getElementById("gallery");
+            images.forEach((image) => {
+              if (!displayedImages.has(image.name)) {
+                const container = document.createElement("div");
+                container.className = "image-container";
 
-          analyser.getByteFrequencyData(dataArray);
+                const img = document.createElement("img");
+                img.src = `/kuvagen/images/${image.name}`;
+                img.alt = image.name;
+                img.addEventListener("click", () => {
+                  showMainPage(image.name);
+                });
 
-          // Calculate average audio level
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i];
-          }
-          const average = sum / bufferLength;
+                const overlay = document.createElement("div");
+                overlay.className = "overlay";
+                overlay.textContent = image.prompt;
 
-          // Update hasAudioData based on audio level
-          const previousHasAudioData = hasAudioData;
-          hasAudioData = average > audioThreshold;
+                container.appendChild(img);
+                container.appendChild(overlay);
+                gallery.insertBefore(container, gallery.firstChild);
 
-          // Only update visual feedback if the state changed
-          if (previousHasAudioData !== hasAudioData) {
-            updateMicStatus();
-          }
-        }, 50); // Check every 50ms for responsive feedback
+                displayedImages.add(image.name);
+              }
+            });
+          })
+          .catch((error) => console.error("Error fetching images:", error));
       }
-
-      function stopAudioLevelMonitoring() {
-        if (audioLevelCheckInterval) {
-          clearInterval(audioLevelCheckInterval);
-          audioLevelCheckInterval = null;
-        }
-      }
-
-      async function processCommand(image, command) {
-        if (!sessionInfo.can_generate) {
-          alert("Image generation limit reached!");
-          return;
-        }
-
-        backendProcessing = true;
-        updateMicStatus();
-        spinner_cont.style.display = "flex";
-        system_status.textContent = "Processing command...";
-
-        try {
-          socket.emit("process_command", { image, command });
-        } catch (error) {
-          console.error("Command processing error:", error);
-          system_status.textContent = "Error: " + error.message;
-          backendProcessing = false;
-          shouldClearTranscription = true;
-          updateMicStatus();
-          spinner_cont.style.display = "none";
-        }
-      }
-
-      // Language selection
-      rb_auto.addEventListener("change", () => {
-        language = "";
-        socket?.emit("lang_select", "");
-      });
-
-      rb_en.addEventListener("change", () => {
-        language = "en";
-        socket?.emit("lang_select", "en");
-      });
-
-      rb_fi.addEventListener("change", () => {
-        language = "fi";
-        socket?.emit("lang_select", "fi");
-      });
-
-      // Model selection
-      rb_local_fast.addEventListener("change", () => {
-        selectedModel = "localfast";
-        socket?.emit("mdl_select", "localfast");
-      });
-
-      rb_local_slow.addEventListener("change", () => {
-        selectedModel = "localslow";
-        socket?.emit("mdl_select", "localslow");
-      });
-
-      rb_cloud.addEventListener("change", () => {
-        selectedModel = "cloud";
-        socket?.emit("mdl_select", "cloud");
-      });
-
-      // Gallery and tree view
-      gallery_button.addEventListener("click", () => {
-        showGallery();
-      });
-
-      chart_button.addEventListener("click", () => {
-        showTreeView(generated_image.alt);
-      });
 
       function showMainPage(image_name) {
         main_page.style.display = "flex";
@@ -1120,140 +1110,135 @@
         generateTreeView(image_name);
       }
 
-      async function updateGallery() {
-        try {
-          const response = await fetch("/kuvagen/images");
-          const images = await response.json();
-
-          images.forEach((image) => {
-            if (!displayedImages.has(image.name)) {
-              const container = document.createElement("div");
-              container.className = "image-container";
-
-              const img = document.createElement("img");
-              img.src = `/kuvagen/images/${image.name}`;
-              img.alt = image.name;
-              img.addEventListener("click", () => {
-                showMainPage(image.name);
-              });
-
-              const overlay = document.createElement("div");
-              overlay.className = "overlay";
-              overlay.textContent = image.prompt;
-
-              const downloadBtn = document.createElement("button");
-              downloadBtn.className = "download-btn";
-              downloadBtn.innerHTML = '<i class="fa fa-download"></i>';
-              downloadBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                downloadImage(image.name);
-              });
-
-              container.appendChild(img);
-              container.appendChild(overlay);
-              container.appendChild(downloadBtn);
-              gallery.insertBefore(container, gallery.firstChild);
-
-              displayedImages.add(image.name);
-            }
-          });
-        } catch (error) {
-          console.error("Error fetching gallery:", error);
-        }
-      }
-
-      function downloadImage(imageName) {
-        const link = document.createElement("a");
-        link.href = `/kuvagen/images/${imageName}`;
-        link.download = `${imageName}.webp`;
-        link.click();
-      }
-
       async function generateTreeView(image_name) {
-        try {
-          const response = await fetch("/kuvagen/gallery");
-          const galleryJson = await response.json();
+        const galleryJson = await fetch("/kuvagen/gallery").then((response) => response.json());
 
-          function findNodeByName(name, nodes) {
-            return nodes.find((node) => node.name === name);
+        // Helper function to find node by name
+        function findNodeByName(name, nodes) {
+          return nodes.find((node) => node.name === name);
+        }
+
+        // Helper function to recursively build the tree structure
+        function buildTree(nodeName, nodes) {
+          const node = findNodeByName(nodeName, nodes);
+          if (!node) {
+            return null;
           }
-
-          function buildTree(nodeName, nodes) {
-            const node = findNodeByName(nodeName, nodes);
-            if (!node) return null;
-
-            const children = nodes
-              .filter((n) => n.parent === nodeName)
-              .map((n) => buildTree(n.name, nodes))
-              .filter(Boolean);
-
-            return {
-              text: { name: node.prompt },
-              children: [
-                {
-                  image: `/kuvagen/images/${node.name}`,
-                  children: children,
-                },
-              ],
-            };
-          }
-
-          function findRootNode(nodeName, nodes) {
-            let currentNode = findNodeByName(nodeName, nodes);
-            while (currentNode && currentNode.parent) {
-              currentNode = findNodeByName(currentNode.parent, nodes);
-            }
-            return currentNode;
-          }
-
-          const rootNode = findRootNode(image_name, galleryJson);
-          if (!rootNode) {
-            console.error("Root node not found");
-            return;
-          }
-
-          const nodeStructure = buildTree(rootNode.name, galleryJson);
-
-          const chart_config = {
-            chart: {
-              container: "#tree_view",
-              rootOrientation: "WEST",
-              connectors: {
-                type: "curve",
-                style: {
-                  "stroke-width": 2,
-                  stroke: "white",
-                },
-              },
+          const children = nodes
+            .filter((n) => n.parent === nodeName)
+            .map((n) => buildTree(n.name, nodes))
+            .filter(Boolean);
+          return {
+            text: {
+              name: node.prompt,
             },
-            nodeStructure: nodeStructure,
+            children: [
+              {
+                image: `/kuvagen/images/${node.name}`,
+                children: children,
+              },
+            ],
           };
+        }
 
-          new Treant(chart_config, function () {
-            const images = document.querySelectorAll(".node img");
-            images.forEach((img) => {
-              img.addEventListener("click", () => {
-                showMainPage(img.src.split("/images/")[1]);
-              });
+        // Find the root node (node with parent value of null)
+        function findRootNode(nodeName, nodes) {
+          let currentNode = findNodeByName(nodeName, nodes);
+          while (currentNode && currentNode.parent) {
+            currentNode = findNodeByName(currentNode.parent, nodes);
+          }
+          return currentNode;
+        }
+
+        const rootNode = findRootNode(image_name, galleryJson);
+        if (!rootNode) {
+          console.error("Root node not found");
+          return;
+        }
+
+        const nodeStructure = buildTree(rootNode.name, galleryJson);
+
+        const simple_chart_config = {
+          chart: {
+            container: "#tree_view",
+            rootOrientation: "WEST",
+            connectors: {
+              type: "curve",
+              style: {
+                "stroke-width": 2,
+                stroke: "white",
+              },
+              levelSeparation: 100,
+              siblingSeparation: 100,
+              subTeeSeparation: 100,
+              scrollbar: "None",
+            },
+          },
+          nodeStructure: nodeStructure,
+        };
+
+        const my_chart = new Treant(simple_chart_config, function () {
+          const images = document.querySelectorAll(".node img");
+          images.forEach((img) => {
+            img.addEventListener("click", () => {
+              showMainPage(img.src.split("/images/")[1]);
             });
-
-            const screenSize = {
-              w: Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
-              h: Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
-            };
-            const elemWid = tree_view.offsetWidth;
-            const elemHei = tree_view.offsetHeight;
-            const initialZoom = Math.min(screenSize.w / elemWid, screenSize.h / elemHei);
-            panzoom_element.zoomAbs(0, 0, initialZoom * 0.9);
-            panzoom_element.moveTo((screenSize.w - elemWid * initialZoom) / 2 - screenSize.w * 0.3, (screenSize.h - elemHei * initialZoom) / 2);
-            panzoom_parent.style.opacity = 1;
           });
-        } catch (error) {
-          console.error("Error generating tree view:", error);
+          const screenSize = {
+            w: Math.max(document.documentElement.clientWidth, window.innerWidth || 0),
+            h: Math.max(document.documentElement.clientHeight, window.innerHeight || 0),
+          };
+          const elemWid = tree_view.offsetWidth;
+          const elemHei = tree_view.offsetHeight;
+          let initalZoom = screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
+          panzoom_element.zoomAbs(0, 0, initalZoom * 0.9);
+          panzoom_element.moveTo((screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3, (screenSize.h - elemHei * initalZoom) / 2);
+          panzoom_parent.style.opacity = 1;
+        });
+      }
+
+      function setLLMStage(stage) {
+        if (stage == "transcription") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
+          transcription.style.borderColor = "yellow";
+          transcription.style.borderWidth = "2px";
+          translation.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+          llm_response.style.borderColor = "white";
+          transcription.style.borderWidth = "1px";
+        } else if (stage == "translation") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "yellow"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
+          transcription.style.borderColor = "lightgreen";
+          translation.style.borderColor = "yellow";
+          llm_response.style.borderColor = "white";
+        } else if (stage == "llm_response") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "yellow"));
+          transcription.style.borderColor = "lightgreen";
+          translation.style.borderColor = "lightgreen";
+          llm_response.style.borderColor = "yellow";
+        } else if (stage == "done") {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "lightgreen"));
+          transcription.style.borderColor = "lightgreen";
+          translation.style.borderColor = "lightgreen";
+          llm_response.style.borderColor = "lightgreen";
+        } else {
+          document.querySelectorAll("#translation_arrows > div").forEach((div) => (div.style.color = "white"));
+          document.querySelectorAll("#llm_arrows > div").forEach((div) => (div.style.color = "white"));
+          transcription.style.borderColor = "white";
+          translation.style.borderColor = "white";
+          llm_response.style.borderColor = "white";
         }
       }
 
-      // Character interaction
+      jr_image.addEventListener("click", function () {
+        changeAvatar();
+      });
+
+      let speechBubbleEnabled = false;
       let counter = 1;
       function changeAvatar() {
         counter++;
@@ -1285,10 +1270,6 @@
             break;
         }
       }
-
-      jr_image.addEventListener("click", function () {
-        changeAvatar();
-      });
 
       let timer = null;
       function processJussiRasku(data) {
@@ -1338,6 +1319,7 @@
 
         // After the fade out and move up is complete, change the text and reset position
         setTimeout(() => {
+          // or textContent? instead of innerText
           speech_bubble.innerText = newText;
           speech_bubble.style.transition = "none"; // Temporarily disable transition for instant position reset
           speech_bubble.style.transform = "translate(0, 60%)"; // Move to the bottom
@@ -1351,6 +1333,7 @@
           speech_bubble.style.opacity = "1";
         }, 500); // Wait for the fade out animation to complete
       }
+
       const responses = {
         en: {
           initReplies: {

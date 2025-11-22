@@ -1,638 +1,475 @@
+"""
+Main web server - lightweight relay to backend.py or cloud services
+Handles: Session management, user limits, routing requests
+"""
 import base64
 import io
 import json
 import os
 import random
-import shutil
 import string
-import tempfile
-import threading
 import time
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
-from flask_socketio import SocketIO, emit
-from pydub import AudioSegment
-import torch
-from transformers import T5EncoderModel, pipeline, BitsAndBytesConfig as TransformersBitsAndBytesConfig, CLIPTextModelWithProjection, CLIPTokenizer
-from diffusers import (
-    BitsAndBytesConfig as DiffusersBitsAndBytesConfig,
-    EulerAncestralDiscreteScheduler,
-    StableDiffusionInstructPix2PixPipeline,
-    StableVideoDiffusionPipeline,
-    StableDiffusionXLPipeline,
-    UNet2DConditionModel,
-    EulerDiscreteScheduler,
-    StableDiffusionXLInstructPix2PixPipeline,
-    AutoencoderKL,
-    EDMEulerScheduler,
-    FluxPipeline,
-    FluxTransformer2DModel,
-    StableDiffusionLatentUpscalePipeline,
-    AutoPipelineForText2Image,
-    FluxKontextPipeline,
-    GGUFQuantizationConfig
-)
-from diffusers.utils import export_to_video
-from huggingface_hub import hf_hub_download, login
-from safetensors.torch import load_file
-from PIL import Image
+import hashlib
+import uuid
 from pathlib import Path
-import json
-from moviepy import *
+from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+from threading import Thread, Lock
+
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, session
+from flask_socketio import SocketIO, emit
 from flask_cors import CORS
-from threading import Lock
-from faster_whisper import WhisperModel, BatchedInferencePipeline
+from PIL import Image
 from dotenv import load_dotenv
-from pydantic import BaseModel
 from openai import OpenAI
 from google import genai
 from google.genai import types
-from ollama import Client as OllamaClient
+import requests
+from pydub import AudioSegment
+from pydantic import BaseModel
 
+# Load environment
+load_dotenv()
+
+# Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+CLOUD_PROVIDER = os.getenv("CLOUD_PROVIDER", "google")  # "openai" or "google"
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# User limits
+MAX_IMAGES_WITHOUT_LOGIN = int(os.getenv("MAX_IMAGES_WITHOUT_LOGIN", "10"))
+
+# Clients
+OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+GOOGLE_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+
+# Flask app
+app = Flask(__name__, template_folder=".")
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-this')
+CORS(app)
+socketio = SocketIO(app, async_mode="threading", path="/kuvagen/socket.io", cors_allowed_origins="*")
+
+# Session storage (in production, use Redis or database)
+user_sessions: Dict[str, Dict[str, Any]] = {}
+backend_available = False
+backend_status_lock = Lock()
+
+# Pydantic model for structured LLM output
 class LLMOutput(BaseModel):
     action: str
     prompt: str
 
-CACHE_DIR = "./cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
+def get_user_id():
+    """Get or create user ID based on request body or session"""
+    # Try to get user_id from request body (for POST requests)
+    if request.is_json and request.json and 'user_id' in request.json:
+        user_id = request.json['user_id']
+        session['user_id'] = user_id
+        return user_id
 
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-login(HUGGINGFACE_TOKEN)
+    # Fall back to session-based approach
+    if 'user_id' not in session:
+        # Generate user ID from IP and user agent
+        ip = request.remote_addr
+        user_agent = request.headers.get('User-Agent', '')
+        raw_id = f"{ip}_{user_agent}"
+        user_id = hashlib.sha256(raw_id.encode()).hexdigest()[:16]
+        session['user_id'] = user_id
 
-# Set transcription method: "local" for local (faster-whisper) or "rest" for OpenAI Whisper REST API (requires API key)
-LOCAL_MODEL_SIZE="turbo" # "small", "medium", "large-v3", "turbo"
-CLOUD_PROVIDER = "google" # "openai" or "google"
+    return session['user_id']
 
-OLLAMA_URL = "http://localhost:11434/v1"
-OLLAMA_MODEL = "hf.co/mradermacher/Llama-Poro-2-8B-Instruct-GGUF:Q4_K_M"#"qwen3:4b"
-OPENAI_MODEL = "gpt-4o-mini"
+def get_or_create_session(user_id: str) -> Dict[str, Any]:
+    """Get or create user session data"""
+    if user_id not in user_sessions:
+        # Load gallery from gallery.json if it exists
+        gallery = load_user_gallery(user_id)
 
-OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
-OLLAMA_CLIENT = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
-GOOGLE_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+        # Default to local slow model if backend is available, otherwise cloud
+        with backend_status_lock:
+            default_model = "localslow" if backend_available else "cloud"
 
-# Setup LLM client based on provider choice.
-def get_llm_client(selected_model) -> OpenAI:
-    if "cloud" in selected_model.lower():
-        print("Using OpenAI API")
-        return OPENAI_CLIENT
-    elif "local" in selected_model.lower():
-        print("Using Ollama API")
-        return OLLAMA_CLIENT
-    else:
-        raise ValueError("Unsupported LLM Provider")
+        user_sessions[user_id] = {
+            "user_id": user_id,
+            "created_at": datetime.now(),
+            "images_generated": len(gallery),  # Count existing images
+            "transcription_language": None,
+            "selected_model": default_model,
+            "gallery": gallery,
+            "current_image": None
+        }
+    return user_sessions[user_id]
 
-def get_llm_model(selected_model):
-    if "cloud" in selected_model.lower():
-        print("Using OpenAI model")
-        return OPENAI_MODEL
-    elif "local" in selected_model.lower():
-        print("Using Ollama model")
-        return OLLAMA_MODEL
-    else:
-        raise ValueError("Unsupported LLM Provider")
+def load_user_gallery(user_id: str) -> list:
+    """Load user's gallery from gallery.json"""
+    filename = "gallery.json"
+    if not os.path.exists(filename):
+        return []
 
-app = Flask(__name__, template_folder=".")
-CORS(app)
-socketio = SocketIO(app, async_mode="threading", path="/kuvagen/socket.io")
-
-lock = Lock()
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using device (cuda/cpu): {device}")
-
-def load_whisper_model():
-    print("Loading WHISPER model...")
-    model = WhisperModel(LOCAL_MODEL_SIZE, device="cuda", compute_type="float16", download_root=CACHE_DIR)
-    print("WHISPER model loaded successfully!")
-    return BatchedInferencePipeline(model=model)
-
-# https://huggingface.co/ByteDance/SDXL-Lightning
-def load_sdxl_lightning():
-    print("Loading SDXL-Lightning model...")
-    base = "stabilityai/stable-diffusion-xl-base-1.0"
-    repo = "ByteDance/SDXL-Lightning"
-    ckpt = "sdxl_lightning_4step_unet.safetensors"
-    unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
-    unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
-    model_path = hf_hub_download(repo, ckpt, cache_dir=CACHE_DIR)
-    unet.load_state_dict(load_file(model_path, device="cuda"))
-    txt2img = StableDiffusionXLPipeline.from_pretrained(
-        base,
-        unet=unet,
-        torch_dtype=torch.float16,
-        variant="fp16",
-        cache_dir=CACHE_DIR
-    )
-    txt2img.to("cuda")
-    txt2img.scheduler = EulerDiscreteScheduler.from_config(
-        txt2img.scheduler.config,
-        timestep_spacing="trailing"
-    )
-    txt2img.enable_model_cpu_offload()
-    print("SDXL-Lightning model loaded successfully!")
-    return txt2img
-
-# https://huggingface.co/city96/FLUX.1-dev-gguf
-def load_flux1_dev_gguf():
-    print("Loading FLUX.1-dev GGUF model...")
-    from diffusers import GGUFQuantizationConfig
-    ckpt_path = (
-        "https://huggingface.co/city96/FLUX.1-dev-gguf/blob/main/flux1-dev-Q2_K.gguf"
-    )
-    transformer = FluxTransformer2DModel.from_single_file(
-        ckpt_path,
-        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-        torch_dtype=torch.bfloat16,
-    )
-    pipe = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-dev",
-        transformer=transformer,
-        torch_dtype=torch.bfloat16,
-    )
-    pipe.enable_model_cpu_offload()
-    print("FLUX.1-dev GGUF model loaded successfully!")
-    return pipe
-
-# https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF
-def load_flux1_kontext_dev_gguf():
-    print("Loading FLUX.1-Kontext-dev GGUF model...")
-    ckpt_path = (
-        "https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF/blob/main/flux1-kontext-dev-Q4_K_M.gguf"
-    )
-    transformer = FluxTransformer2DModel.from_single_file(
-        ckpt_path,
-        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-        torch_dtype=torch.bfloat16,
-    )
-    pipe = FluxKontextPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        transformer=transformer,
-        torch_dtype=torch.bfloat16,
-    )
-    pipe.enable_model_cpu_offload()
-    print("FLUX.1-Kontext-dev GGUF model loaded successfully!")
-    return pipe
-
-# https://huggingface.co/black-forest-labs/FLUX.1-schnell
-def load_flux1_schnell():
-    print("Loading FLUX.1-Schnell model...")
-    quant_config = TransformersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    text_encoder_2_4bit = T5EncoderModel.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
-        subfolder="text_encoder_2",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
-    )
-    quant_config = DiffusersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    transformer_4bit = FluxTransformer2DModel.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
-        subfolder="transformer",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1 = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
-        text_encoder_2=text_encoder_2_4bit,
-        transformer=transformer_4bit,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1.enable_model_cpu_offload()
-    print("FLUX.1-Schnell model loaded successfully!")
-    return flux1
-
-# https://huggingface.co/black-forest-labs/FLUX.1-schnell
-def load_flux1_kontext_dev():
-    print("Loading FLUX.1-Kontext-dev model...")
-    quant_config = TransformersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    text_encoder_2_4bit = T5EncoderModel.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        subfolder="text_encoder_2",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
-    )
-    quant_config = DiffusersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    transformer_4bit = FluxTransformer2DModel.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        subfolder="transformer",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1 = FluxKontextPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        text_encoder_2=text_encoder_2_4bit,
-        transformer=transformer_4bit,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1.enable_model_cpu_offload()
-    print("FLUX.1-Schnell model loaded successfully!")
-    return flux1
-
-# https://huggingface.co/timbrooks/instruct-pix2pix
-def load_instruct_pix2pix():
-    print("Loading Instruct-Pix2Pix model...")
-    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-        "timbrooks/instruct-pix2pix",
-        torch_dtype=torch.float16,
-        #safety_checker=None,
-        cache_dir=CACHE_DIR
-    )
-    pix2pix.to("cuda")
-    pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
-    #pix2pix.enable_model_cpu_offload()
-    print("Instruct-Pix2Pix model loaded successfully!")
-    return pix2pix
-
-# https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
-# https://huggingface.co/stabilityai/cosxl
-def load_cosxl_edit():
-    print("Loading COSXL-Edit model...")
-    vae = AutoencoderKL.from_pretrained(
-        "madebyollin/sdxl-vae-fp16-fix",
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
-    )
-    model_path = hf_hub_download(
-        repo_id="stabilityai/cosxl",
-        filename="cosxl_edit.safetensors",
-        cache_dir=CACHE_DIR
-    )
-    cosxl = StableDiffusionXLInstructPix2PixPipeline.from_single_file(
-        model_path,
-        vae=vae,
-        torch_dtype=torch.float16,
-        num_in_channels=8,
-        is_cosxl_edit=True,
-        cache_dir=CACHE_DIR
-    )
-    cosxl.to("cuda")
-    cosxl.scheduler = EDMEulerScheduler(
-        sigma_min=0.002,
-        sigma_max=120.0,
-        sigma_data=1.0,
-        prediction_type="v_prediction",
-        sigma_schedule="exponential"
-    )
-    cosxl.enable_model_cpu_offload()
-    print("COSXL-Edit model loaded successfully!")
-    return cosxl
-
-# https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt
-def load_video_diffusion():
-    print("Loading Video-Diffusion model...")
-    img2vid = StableVideoDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        cache_dir=CACHE_DIR
-    )
-    img2vid.to("cuda")
-    img2vid.enable_model_cpu_offload()
-    img2vid.unet.enable_forward_chunking()
-    print("Video-Diffusion model loaded successfully!")
-    return img2vid
-
-def load_ollama_llm():
-    print("Loading LLM...")
-    messages = [
-        {"role": "system", "content": "You are a loader! You say 'I am loaded'."},
-        {"role": "user", "content": "Tell me you are loaded!"}
-    ]
     try:
-        response = OLLAMA_CLIENT.beta.chat.completions.parse(
-            model=get_llm_model("local"),
-            messages=messages,
-            max_tokens=100,
-            response_format=LLMOutput,
-            extra_body={"num_ctx": 1280}
-        )
-        print("LLM loaded successfully!")
-    except Exception as e:
-        print(f"Error loading LLM: {e}")
+        with open(filename, 'r') as file:
+            all_data = json.load(file)
 
-def periodic_ollama_loader():
+        # Filter for this user's images
+        user_gallery = []
+        for entry in all_data:
+            if entry.get("user_id") == user_id:
+                user_gallery.append({
+                    "name": entry["name"],
+                    "prompt": entry["prompt"],
+                    "parent": entry.get("parent"),
+                    "created_at": entry.get("created_at", datetime.now().isoformat())
+                })
+
+        return user_gallery
+    except Exception as e:
+        print(f"Error loading gallery for user {user_id}: {e}")
+        return []
+
+def check_user_limit(user_id: str) -> bool:
+    """Check if user has exceeded image generation limit"""
+    user_data = get_or_create_session(user_id)
+    return user_data["images_generated"] < MAX_IMAGES_WITHOUT_LOGIN
+
+def increment_user_count(user_id: str):
+    """Increment user's image generation count"""
+    user_data = get_or_create_session(user_id)
+    user_data["images_generated"] += 1
+
+def check_backend_availability():
+    """Check if backend.py is available"""
+    global backend_available
+    try:
+        response = requests.get(f"{BACKEND_URL}/health", timeout=2)
+        status = response.status_code == 200
+        with backend_status_lock:
+            backend_available = status
+        print(f"Backend availability: {backend_available}")
+    except Exception as e:
+        with backend_status_lock:
+            backend_available = False
+        print(f"Backend not available: {e}")
+    return backend_available
+
+def poll_backend_health():
+    """Background task to poll backend health every 5 minutes"""
+    import time
     while True:
-        try:
-            load_ollama_llm()
-        except Exception as e:
-            print(f"Error in periodic Ollama loader: {e}")
-        time.sleep(60)
+        check_backend_availability()
+        time.sleep(300)  # 5 minutes
 
-print("Loading models...")
+# Check backend on startup
+check_backend_availability()
 
-load_ollama_llm()
-whisper_model = load_whisper_model()
-sdxl_l_txt2img = load_sdxl_lightning()
-pix2pix_img2img = load_instruct_pix2pix()
-#svd_xt_img2vid = load_video_diffusion()
+# Start background health check polling
+health_check_thread = Thread(target=poll_backend_health, daemon=True)
+health_check_thread.start()
 
-# Better quality but slower local models
-#flux1_txt2img = load_flux1_schnell()
-#flux1_img2img = load_flux1_kontext_dev()
-sd_cosxl_img2img = load_cosxl_edit()
-# load flux kontext gguf
-#flux1_kontext_gguf = load_flux1_kontext_dev_gguf()
+@app.route("/kuvagen/")
+def index():
+    """Serve main page"""
+    return render_template("index.html")
 
-# Holder for whole recording
-audio_segments = []
-transcription_language = None
-selected_model = "localfast"
+@app.route("/kuvagen/api/check_backend")
+def api_check_backend():
+    """Check if local backend is available (returns cached status)"""
+    with backend_status_lock:
+        available = backend_available
+    return jsonify({"available": available})
 
-def try_catch(function, *args, **kwargs):
+@app.route("/kuvagen/api/session_info", methods=["GET", "POST"])
+def api_session_info():
+    """Get current session information"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+
+    with backend_status_lock:
+        available = backend_available
+
+    return jsonify({
+        "user_id": user_id,
+        "images_generated": user_data["images_generated"],
+        "max_images": MAX_IMAGES_WITHOUT_LOGIN,
+        "can_generate": check_user_limit(user_id),
+        "backend_available": available,
+        "default_model": user_data["selected_model"]
+    })
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    print(f'Client connected')
+    emit("status", "Connected to server! Ready to go!")
+
+@socketio.on('user_id')
+def handle_user_id(data):
+    """Handle user ID from client"""
+    if data:
+        session['user_id'] = data
+        user_data = get_or_create_session(data)
+        print(f'User ID set: {data}, images generated: {user_data["images_generated"]}')
+
+@socketio.on("lang_select")
+def handle_lang_select(data):
+    """Handle language selection"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+    user_data["transcription_language"] = None if data == "" else data
+    print(f"User {user_id} selected language: {data}")
+    emit("status", "Updated language selection!")
+
+@socketio.on("mdl_select")
+def handle_model_select(data):
+    """Handle model selection"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+    user_data["selected_model"] = data
+    print(f"User {user_id} selected model: {data}")
+    emit("status", "Updated model selection!")
+
+@socketio.on("full_audio_data")
+def handle_full_audio_data(data):
+    """Handle audio transcription"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+    selected_model = user_data["selected_model"]
+    language = user_data["transcription_language"]
+
     try:
-        return function(*args, **kwargs)
-    except Exception as e:
-        print(f"An error occurred in {function}: {e}")
-        socketio.emit("error", f"error: {e}")
+        if "local" in selected_model and backend_available:
+            # Use local backend
+            response = requests.post(
+                f"{BACKEND_URL}/transcribe",
+                json={
+                    "audio_base64": data,
+                    "language": language
+                },
+                timeout=30
+            )
+            result = response.json()
 
-def poll_llm(user_prompt):
+            if result.get("error"):
+                emit("empty_transcription", result["error"])
+                emit("status", "Waiting...")
+                return
+
+            transcription = result.get("transcription", "")
+
+        elif "cloud" in selected_model:
+            # Use cloud transcription
+            audio_bytes = base64.b64decode(data)
+
+            # Save temporarily
+            temp_path = "temp_audio.webm"
+            with open(temp_path, "wb") as f:
+                f.write(audio_bytes)
+
+            # Transcribe with OpenAI
+            with open(temp_path, "rb") as audio_file:
+                response = OPENAI_CLIENT.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language=language,
+                    response_format="text"
+                )
+            transcription = response
+
+            # Cleanup
+            os.remove(temp_path)
+        else:
+            emit("error", "No transcription service available")
+            return
+
+        if transcription == "":
+            emit("empty_transcription", "No audio detected, please try again.")
+            emit("status", "Waiting...")
+            return
+
+        print(f"Transcription for {user_id}: {transcription}")
+        emit("final_transcription_result", transcription)
+
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        emit("error", f"Transcription error: {str(e)}")
+
+@socketio.on("partial_audio_data")
+def handle_partial_audio_data(data):
+    """Handle partial audio transcription for live feedback"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+    selected_model = user_data["selected_model"]
+    language = user_data["transcription_language"]
+
+    try:
+        if "local" in selected_model and backend_available:
+            # Use local backend
+            response = requests.post(
+                f"{BACKEND_URL}/transcribe",
+                json={
+                    "audio_base64": data,
+                    "language": language
+                },
+                timeout=10
+            )
+            result = response.json()
+
+            if not result.get("error"):
+                transcription = result.get("transcription", "")
+                if transcription and transcription.strip():
+                    emit("transcription", transcription)
+
+        elif "cloud" in selected_model:
+            # Use cloud transcription
+            audio_bytes = base64.b64decode(data)
+
+            # Check if audio is too small
+            if len(audio_bytes) < 1000:  # Less than 1KB, probably too short
+                return
+
+            # Save temporarily
+            temp_path = f"temp_partial_{user_id}_{uuid.uuid4()}.webm"
+            with open(temp_path, "wb") as f:
+                f.write(audio_bytes)
+
+            # Check audio duration before transcribing
+            try:
+                audio_segment = AudioSegment.from_file(temp_path)
+                if len(audio_segment) < 500:  # Less than 500ms
+                    os.remove(temp_path)
+                    return
+            except:
+                # If we can't read the audio, skip it
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return
+
+            # Transcribe with OpenAI
+            with open(temp_path, "rb") as audio_file:
+                response = OPENAI_CLIENT.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language=language,
+                    response_format="text"
+                )
+            transcription = response
+
+            # Cleanup
+            os.remove(temp_path)
+
+            if transcription and transcription.strip():
+                emit("transcription", transcription)
+
+    except Exception as e:
+        # Silently fail for partial transcriptions
+        print(f"Partial transcription error (ignoring): {e}")
+        pass
+
+@socketio.on("process_command")
+def handle_process_command(data):
+    """Process user command through LLM and execute action"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+
+    command = data.get("command")
+    image = data.get("image")
+    selected_model = user_data["selected_model"]
+
+    print(f"Processing command for {user_id}: {command}")
+
+    try:
+        # Check user limit for create/edit actions
+        if not check_user_limit(user_id):
+            emit("command_error", "Image generation limit reached. Please log in to continue.")
+            return
+
+        # Get LLM response for action determination
+        if "local" in selected_model and backend_available:
+            # Use local LLM
+            response = requests.post(
+                f"{BACKEND_URL}/llm",
+                json={"user_prompt": command},
+                timeout=30
+            )
+            llm_result = response.json()
+            action = llm_result["action"]
+            prompt = llm_result["prompt"]
+        else:
+            # Use cloud LLM
+            action, prompt = poll_llm_cloud(command)
+
+        print(f"LLM response: {action}, {prompt}")
+        emit("llm_response", f"{action}: {prompt}")
+
+        # Execute action
+        if action == "create":
+            emit("status", "Creating new image...")
+            result = generate_image_socketio(user_id, prompt)
+            emit("command_result", result)
+        elif action == "edit":
+            emit("status", "Editing image...")
+            result = edit_image_socketio(user_id, image, prompt)
+            emit("command_result", result)
+        elif action == "undo":
+            emit("status", "Reverting to previous image...")
+            result = previous_image_socketio(user_id, image)
+            emit("command_result", result)
+        elif action == "error":
+            emit("command_error", prompt)
+        else:
+            emit("command_error", "Unknown action")
+
+    except Exception as e:
+        print(f"Error processing command: {e}")
+        emit("command_error", str(e))
+
+def poll_llm_cloud(user_prompt: str):
+    """Use cloud LLM for action determination"""
     system_prompt = Path('intention_recognition_prompt_v3_no_video.txt').read_text()
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
     ]
-    try:
-        extra_body = None
-        if "local" in selected_model:
-            extra_body = {"num_ctx": 1280}
 
-        response = get_llm_client(selected_model).beta.chat.completions.parse(
-            model=get_llm_model(selected_model),
+    try:
+        response = OPENAI_CLIENT.beta.chat.completions.parse(
+            model=OPENAI_MODEL,
             messages=messages,
             max_tokens=200,
             response_format=LLMOutput,
-            extra_body=extra_body,
         )
         result = response.choices[0].message.parsed
         return result.action, result.prompt
     except Exception as e:
-        print("Error in poll_llm:", e)
-    return None, None
+        print(f"Cloud LLM error: {e}")
+        return "error", str(e)
 
-def run_whisper(audio_path, language=None):
-    print("Running !" + selected_model + "! Whisper for language !" + str(language) + "!")
-    with lock:
-        if "local" in selected_model:
-            segments, _ = whisper_model.transcribe(audio_path, language=language, task="transcribe", batch_size=16)
-            result_text = ' '.join([segment.text for segment in segments])
-            return result_text
-        if "cloud" in selected_model:
-            try:
-                with open(audio_path, "rb") as audio_file:
-                    client = get_llm_client(selected_model)
-                    response = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file,
-                        language=language,
-                        response_format="text"
-                    )
-                return response
-            except Exception as e:
-                print(f"An error occurred during OpenAI Whisper processing: {e}")
-                return ""
+def generate_image_socketio(user_id: str, prompt: str):
+    """Generate new image - SocketIO version"""
+    user_data = get_or_create_session(user_id)
+    selected_model = user_data["selected_model"]
 
-        # error
-        print("No whisper model selected!")
-        return ""
+    if "local" in selected_model and backend_available:
+        # Use local backend with queue
+        response = requests.post(
+            f"{BACKEND_URL}/generate_image",
+            json={
+                "prompt": prompt,
+                "session_id": user_id
+            },
+            timeout=10
+        )
+        result = response.json()
+        task_id = result["task_id"]
 
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
+        # Poll for completion
+        return poll_task_completion_socketio(user_id, task_id, prompt, None)
 
-@socketio.on("lang_select")
-def handle_lang_select(data):
-    print(f"Selected language: {data}")
-    global transcription_language
-    transcription_language = None if data == "" else data
-    emit("status", "Updated language selection!")
-
-@socketio.on("mdl_select")
-def handle_lang_select(data):
-    print(f"Selected models: {data}")
-    global selected_model
-    selected_model = data
-    emit("status", "Updated model selection!")
-
-@socketio.on("full_audio_data")
-def handle_full_audio_data(data):
-    print("Transcribing full audio data...")
-    try_catch(process_full_audio, data)
-
-def process_full_audio(data):
-    decode = base64.b64decode(data)
-    with open(f"full_audio.webm", "wb") as f:
-        f.write(decode)
-    audio = AudioSegment.from_file("full_audio.webm")
-    if len(audio) < 2000:
-        emit("empty_transcription", "No audio detected, please try again.")
-        emit("status", "Waiting...")
-        return
-    result_text = run_whisper("full_audio.webm", transcription_language)
-    if result_text == "":
-        emit("empty_transcription", "No audio detected, please try again.")
-        emit("status", "Waiting...")
-        return
-    print(f"Full transcription: {result_text}")
-    emit("final_transcription_result", result_text)
-
-@socketio.on("audio_data")
-def handle_audio_data(data):
-    print("Transcribing audio data...")
-    try_catch(process_transcription, data)
-
-def process_transcription(data):
-    decode = base64.b64decode(data)
-    segment = AudioSegment.from_file(io.BytesIO(decode), format="wav")
-    audio_segments.append(segment)
-
-    with open(f"audio.wav", "wb") as f:
-        f.write(decode)
-
-    result_text = run_whisper("audio.wav", transcription_language)
-
-    print(f"Transcription: {result_text}")
-    emit("transcription", result_text)
-
-def save_concatenated_audio():
-    print(f"Concatenating {len(audio_segments)} audio segments...")
-    concatenated = AudioSegment.empty()
-    for segment in audio_segments:
-        concatenated += segment
-    print(f"Exporting concatenated audio ({len(concatenated)}ms)...")
-    concatenated.export("concatenated_audio.wav", format="wav")
-    print("Audio segments cleared")
-    audio_segments.clear()
-
-@socketio.on("final_transcription")
-def handle_final_transcription():
-    print("Processing final transcription...")
-    try_catch(process_final_transcription)
-
-def process_final_transcription():
-    print("Starting save_concatenated_audio...")
-    save_concatenated_audio()
-    print("save_concatenated_audio completed, starting transcription...")
-    result_text = run_whisper("concatenated_audio.wav", transcription_language)
-    print(f"Final transcription: {result_text}")
-    emit("final_transcription_result", result_text)
-
-@app.route("/kuvagen/process_command", methods=["POST"])
-def process_command():
-    data = request.json
-    command = data.get("command")
-    image = data.get("image")
-    print(f"Processing command: {command}")
-    start_time = time.time()
-    result = try_catch(llm_process_command, image, command)
-    end_time = time.time()
-    elapsed_time = (end_time - start_time) * 1000
-    print(f"Time elapsed: {elapsed_time:.2f} ms")
-    return result
-
-def llm_process_command(image, command):
-    action, prompt = poll_llm(command)
-    print(f"LLM response: {action}, {prompt}")
-    socketio.emit("llm_response", action + ": " + prompt)
-    if action == "create":
-        socketio.emit("status", "Creating new image...")
-        return generate_image(prompt)
-    if action == "edit":
-        socketio.emit("status", "Editing image...")
-        return edit_image(image, prompt)
-    if action == "video":
-        socketio.emit("status", "Generating video from image...")
-        return generate_video_from_image(image, prompt)
-    if action == "undo":
-        socketio.emit("status", "Reverting to previous image...")
-        return previous_image(image)
-    if action == "error":
-        return jsonify({"error": prompt})
-
-def make_optimised_callback(pipe, frequency: int = 11):
-    def callback(step: int, timestep: int, latents: torch.Tensor):
-        socketio.emit("status", f"Generating, Step {step+1}")
-        if step % frequency == 0:
-            with torch.no_grad():
-                latents_scaled = (1 / 0.18215) * latents
-                image_tensor = pipe.vae.decode(latents_scaled).sample
-                image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-                image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-                pil_images = pipe.numpy_to_pil(image_array)
-
-                if pil_images and len(pil_images) > 0:
-                    image_to_send = pil_images[0]
-                    buffered = io.BytesIO()
-                    image_to_send.save(buffered, format="PNG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                    socketio.emit("image_progress", img_str)
-    return callback
-
-def progress_callback_on_step_end(pipe, step: int, timestep: int, callback_kwargs: dict):
-    socketio.emit("status", f"Generating, Step {step+1}")
-    latents = callback_kwargs.get("latents")
-    latents_scaled = (1 / 0.18215) * latents
-    image_tensor = pipe.vae.decode(latents_scaled).sample
-    image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-    image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-    pil_images = pipe.numpy_to_pil(image_array)
-    buffered = io.BytesIO()
-    pil_images[0].save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-    socketio.emit("image_progress", img_str)
-    return callback_kwargs
-
-def video_progress(pipe, step: int, timestep: int, callback_kwargs: dict):
-    socketio.emit("status", f"Generating, Step {step+1}")
-    latents = callback_kwargs.get("latents")
-    first_frame_latents = latents[0, 0:1]
-    with torch.no_grad():
-        latents_scaled = (1 / 0.18215) * first_frame_latents
-        image_tensor = pipe.vae.decode(latents_scaled, num_frames=1).sample
-        image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-        image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-        pil_images = pipe.numpy_to_pil(image_array)
-        resized_image = pil_images[0].resize((1024, 1024), resample=Image.LANCZOS)
-        buffered = io.BytesIO()
-        resized_image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        socketio.emit("image_progress", img_str)
-    return callback_kwargs
-
-def progress_callback_old(pipe, step: int, timestep: int, callback_kwargs):
-    socketio.emit("status", f"Generating, Step {step+1}")
-    latents = callback_kwargs["latents"]
-    image = latents_to_rgb_old(latents)
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-    socketio.emit("image_progress", img_str)
-    return callback_kwargs
-
-def latents_to_rgb_old(latents):
-    weights = (
-        (60, -60, 25, -70),
-        (60,  -5, 15, -50),
-        (60,  10, -5, -35)
-    )
-    weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
-    biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
-    rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
-    image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
-    image_array = image_array.transpose(1, 2, 0)
-    return Image.fromarray(image_array)
-
-def generate_image(prompt):
-    print(f"Generating image for prompt: {prompt}")
-
-    if "local" in selected_model:
-        if "fast" in selected_model or "slow" in selected_model:
-            print("Using SDXL Lightning for fast model option")
-            image = sdxl_l_txt2img(
-                prompt,
-                num_inference_steps=4,
-                guidance_scale=0,
-                callback_on_step_end=progress_callback_old
-            ).images[0]
-        elif "superslow" in selected_model:
-            # FLUX model not loaded, using SDXL Lightning instead
-            print("Using SDXL Lightning for superslow model option")
-            image = sdxl_l_txt2img(
-                prompt,
-                num_inference_steps=8,
-                guidance_scale=0,
-                callback_on_step_end=progress_callback_old
-            ).images[0]
-    if "cloud" in selected_model:
-        if "openai" in CLOUD_PROVIDER:
-            response = get_llm_client(selected_model).images.generate(
+    else:
+        # Use cloud service
+        image = None
+        if CLOUD_PROVIDER == "openai":
+            response = OPENAI_CLIENT.images.generate(
                 prompt=prompt,
                 model="dall-e-3",
                 size="1024x1024",
@@ -641,7 +478,7 @@ def generate_image(prompt):
                 n=1,
             )
             image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
-        if "google" in CLOUD_PROVIDER:
+        elif CLOUD_PROVIDER == "google":
             response = GOOGLE_CLIENT.models.generate_content(
                 model="gemini-2.5-flash-image-preview",
                 contents=["Please generate the following image: " + prompt],
@@ -649,48 +486,65 @@ def generate_image(prompt):
                     response_modalities=['Text', 'Image']
                 )
             )
-            image = None
             for part in response.candidates[0].content.parts:
                 if part.inline_data is not None:
                     image = Image.open(io.BytesIO(part.inline_data.data))
                     break
-            if image is None:
-                raise Exception("No edited image output in response.")
 
-    image = save_image(image, prompt)
-    return jsonify({"image": image, "prompt": prompt})
+        if image is None:
+            raise Exception("No image generated")
 
-def edit_image(parent_image, prompt):
-    print(f"Editing image with prompt: {prompt}")
-    image = get_saved_image(parent_image)
+        # Save image
+        image_name = save_image(user_id, image, prompt, None)
+        increment_user_count(user_id)
 
-    if "local" in selected_model:
-        if "fast" in selected_model:
-            image = image.resize((512, 512), Image.Resampling.LANCZOS)
-            image = pix2pix_img2img(
-                prompt,
-                image=image,
-                num_inference_steps=40,
-                callback_on_step_end=progress_callback_old
-            ).images[0]
-            image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
-        if "slow" in selected_model:
-            callback = make_optimised_callback(sd_cosxl_img2img, frequency=21)
-            image = sd_cosxl_img2img(
-                prompt=prompt,
-                image=image,
-                num_inference_steps=20,
-                callback=callback,
-                callback_steps=1
-            ).images[0]
-    if "cloud" in selected_model:
-        if "openai" in CLOUD_PROVIDER:
+        return {"image": image_name, "prompt": prompt}
+
+def edit_image_socketio(user_id: str, parent_image: str, prompt: str):
+    """Edit existing image - SocketIO version"""
+    user_data = get_or_create_session(user_id)
+    selected_model = user_data["selected_model"]
+
+    # Get parent image
+    image = get_saved_image(user_id, parent_image)
+
+    if "local" in selected_model and backend_available:
+        # Convert image to base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+        # Determine model type
+        model_type = "fast" if "fast" in selected_model else "slow"
+
+        # Use local backend with queue
+        response = requests.post(
+            f"{BACKEND_URL}/edit_image",
+            json={
+                "prompt": prompt,
+                "image_base64": image_base64,
+                "session_id": user_id,
+                "model": model_type
+            },
+            timeout=10
+        )
+        result = response.json()
+        task_id = result["task_id"]
+
+        # Poll for completion
+        return poll_task_completion_socketio(user_id, task_id, prompt, parent_image)
+
+    else:
+        # Use cloud service
+        edited_image = None
+        if CLOUD_PROVIDER == "openai":
+            import tempfile
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_file_path = os.path.join(temp_dir, 'temp_image.png')
                 image = image.convert('RGBA')
                 image.save(temp_file_path, format='PNG')
                 with open(temp_file_path, 'rb') as image_file, open("dalle2_mask.png", "rb") as mask_file:
-                    response = get_llm_client(selected_model).images.edit(
+                    response = OPENAI_CLIENT.images.edit(
                         prompt=prompt,
                         image=image_file,
                         mask=mask_file,
@@ -699,8 +553,8 @@ def edit_image(parent_image, prompt):
                         response_format="b64_json",
                         n=1,
                     )
-                image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
-        if "google" in CLOUD_PROVIDER:
+                edited_image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+        elif CLOUD_PROVIDER == "google":
             response = GOOGLE_CLIENT.models.generate_content(
                 model="gemini-2.5-flash-image-preview",
                 contents=["Please edit the image: " + prompt, image],
@@ -708,159 +562,390 @@ def edit_image(parent_image, prompt):
                     response_modalities=['Text', 'Image']
                 )
             )
-            image = None
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None:
+                    edited_image = Image.open(io.BytesIO(part.inline_data.data))
+                    break
+
+        if edited_image is None:
+            raise Exception("No edited image generated")
+
+        # Save image
+        image_name = save_image(user_id, edited_image, prompt, parent_image)
+        increment_user_count(user_id)
+
+        return {"image": image_name, "prompt": prompt}
+
+def previous_image_socketio(user_id: str, image_name: str):
+    """Go to previous image in history - SocketIO version"""
+    user_data = get_or_create_session(user_id)
+    gallery = user_data["gallery"]
+
+    # Find current image in gallery
+    for img_data in gallery:
+        if img_data["name"] == image_name:
+            parent = img_data.get("parent")
+            if parent:
+                return {"image": parent}
+            else:
+                return {"error": "No previous image"}
+
+    return {"error": "No previous image"}
+
+def poll_task_completion_socketio(user_id: str, task_id: str, prompt: str, parent: Optional[str]):
+    """Poll backend task until completion - SocketIO version"""
+    from flask_socketio import emit
+    max_polls = 120  # 2 minutes max
+    poll_count = 0
+
+    while poll_count < max_polls:
+        time.sleep(1)
+        poll_count += 1
+
+        try:
+            response = requests.get(f"{BACKEND_URL}/task_status/{task_id}", timeout=5)
+            status_data = response.json()
+
+            status = status_data.get("status")
+
+            if status == "processing":
+                progress = status_data.get("progress", 0)
+                emit("generation_progress", {"progress": progress})
+
+                # Send preview if available
+                preview = status_data.get("preview")
+                if preview:
+                    emit("generation_preview", {"preview": preview})
+
+            elif status == "completed":
+                result = status_data.get("result", {})
+                image_base64 = result.get("image_base64")
+
+                if not image_base64:
+                    return {"error": "No image in result"}
+
+                # Decode and save image
+                image_data = base64.b64decode(image_base64)
+                image = Image.open(io.BytesIO(image_data))
+                image_name = save_image(user_id, image, prompt, parent)
+                increment_user_count(user_id)
+
+                return {"image": image_name, "prompt": prompt}
+
+            elif status == "failed":
+                error = status_data.get("error", "Unknown error")
+                return {"error": error}
+
+        except Exception as e:
+            print(f"Error polling task: {e}")
+
+    return {"error": "Task timeout"}
+
+def generate_image(user_id: str, prompt: str):
+    """Generate new image"""
+    user_data = get_or_create_session(user_id)
+    selected_model = user_data["selected_model"]
+
+    if "local" in selected_model and backend_available:
+        # Use local backend with queue
+        response = requests.post(
+            f"{BACKEND_URL}/generate_image",
+            json={
+                "prompt": prompt,
+                "session_id": user_id
+            },
+            timeout=10
+        )
+        result = response.json()
+        task_id = result["task_id"]
+        position = result["position"]
+
+        # Poll for completion
+        return poll_task_completion(user_id, task_id, prompt, None)
+
+    else:
+        # Use cloud service
+        image = None
+        if CLOUD_PROVIDER == "openai":
+            response = OPENAI_CLIENT.images.generate(
+                prompt=prompt,
+                model="dall-e-3",
+                size="1024x1024",
+                response_format="b64_json",
+                quality="standard",
+                n=1,
+            )
+            image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+        elif CLOUD_PROVIDER == "google":
+            response = GOOGLE_CLIENT.models.generate_content(
+                model="gemini-2.5-flash-image-preview",
+                contents=["Please generate the following image: " + prompt],
+                config=types.GenerateContentConfig(
+                    response_modalities=['Text', 'Image']
+                )
+            )
             for part in response.candidates[0].content.parts:
                 if part.inline_data is not None:
                     image = Image.open(io.BytesIO(part.inline_data.data))
                     break
-            if image is None:
-                raise Exception("No edited image output in response.")
 
-    print("Edited image!")
-    image = save_image(image, prompt, parent=parent_image)
-    return jsonify({"image": image, "prompt": prompt})
+        if image is None:
+            raise Exception("No image generated")
 
-def previous_image(image):
-    print("Going to previous image")
-    gallery_json = json.load(open("gallery.json", "r"))
-    for obj in gallery_json:
-        if obj["name"] == image:
-            prompt = obj["prompt"]
-            parent = obj["parent"]
-            break
+        # Save image
+        image_name = save_image(user_id, image, prompt, None)
+        increment_user_count(user_id)
 
-    if parent:
-        return jsonify({"image": parent, "prompt": prompt, "action": "undo"})
+        return jsonify({"image": image_name, "prompt": prompt})
 
-    image_file = get_previous_image("./gallery", image + ".webp")
-    for obj in gallery_json:
-        if obj["name"] == image_file:
-            prompt = obj["prompt"]
-            break
-    image_file = image_file.replace(".webp", "")
-    return jsonify({"image": image_file, "prompt": prompt, "action": "undo"})
+def edit_image(user_id: str, parent_image: str, prompt: str):
+    """Edit existing image"""
+    user_data = get_or_create_session(user_id)
+    selected_model = user_data["selected_model"]
 
-def mp4_to_webp(mp4_path, webp_path, fps):
-    clip = VideoFileClip(mp4_path)
-    forward_clip = clip
-    backward_clip = clip.with_effects([vfx.TimeMirror()])
-    looping_clip = concatenate_videoclips([forward_clip, backward_clip])
+    # Get parent image
+    image = get_saved_image(user_id, parent_image)
 
-    # Save frames as individual WebP images
-    frames = []
-    for frame in looping_clip.iter_frames(fps=fps):
-        img = Image.fromarray(frame)
-        img = img.resize((1024, 1024), Image.Resampling.LANCZOS)
-        frames.append(img)
+    if "local" in selected_model and backend_available:
+        # Convert image to base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-    # Save frames as a looping WebP animation
-    frames[0].save(
-        webp_path,
-        save_all=True,
-        append_images=frames[1:],
-        duration=int(1000 / fps),
-        loop=0
-    )
+        # Determine model type
+        model_type = "fast" if "fast" in selected_model else "slow"
 
-def generate_video_from_image(parent_image, prompt):
-    print("Generating video from image...")
-    image = get_saved_image(parent_image)
-    image = image.resize((1024, 576), Image.Resampling.LANCZOS)
-    frames = svd_xt_img2vid( # type: ignore
-        image=image,
-        num_frames=14,
-        decode_chunk_size=2,
-        num_inference_steps=10,
-        callback_on_step_end=video_progress,
-    ).frames[0]
-    print("Video generated!")
-    export_to_video(frames, "generated_video.mp4", fps=7)
-    mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
-    image = Image.open("generated_video.webp")
-    image = save_image(image, prompt, parent=parent_image)
-    shutil.copyfile("generated_video.webp", "./gallery/" + image + ".webp")
-    return jsonify({"image": image, "prompt": prompt})
+        # Use local backend with queue
+        response = requests.post(
+            f"{BACKEND_URL}/edit_image",
+            json={
+                "prompt": prompt,
+                "image_base64": image_base64,
+                "session_id": user_id,
+                "model": model_type
+            },
+            timeout=10
+        )
+        result = response.json()
+        task_id = result["task_id"]
 
-def get_saved_image(image_name):
-    path = f"./gallery/{image_name}.webp"
-    file_size = os.path.getsize(path)
-    if file_size < 500 * 1024:
-        return Image.open(path)
-    gallery_json = json.load(open("gallery.json", "r"))
-    for obj in gallery_json:
-        if obj["name"] == image_name:
-            if obj["parent"]:
-                return get_saved_image(obj["parent"])
-    return None
+        # Poll for completion
+        return poll_task_completion(user_id, task_id, prompt, parent_image)
 
-@app.route("/kuvagen/gallery")
-def get_gallery_json():
-    return send_file("gallery.json", mimetype="application/json")
+    else:
+        # Use cloud service
+        edited_image = None
+        if CLOUD_PROVIDER == "openai":
+            import tempfile
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_file_path = os.path.join(temp_dir, 'temp_image.png')
+                image = image.convert('RGBA')
+                image.save(temp_file_path, format='PNG')
+                with open(temp_file_path, 'rb') as image_file, open("dalle2_mask.png", "rb") as mask_file:
+                    response = OPENAI_CLIENT.images.edit(
+                        prompt=prompt,
+                        image=image_file,
+                        mask=mask_file,
+                        model="dall-e-2",
+                        size="1024x1024",
+                        response_format="b64_json",
+                        n=1,
+                    )
+                edited_image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
+        elif CLOUD_PROVIDER == "google":
+            response = GOOGLE_CLIENT.models.generate_content(
+                model="gemini-2.5-flash-image-preview",
+                contents=["Please edit the image: " + prompt, image],
+                config=types.GenerateContentConfig(
+                    response_modalities=['Text', 'Image']
+                )
+            )
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None:
+                    edited_image = Image.open(io.BytesIO(part.inline_data.data))
+                    break
 
-@app.route("/kuvagen/images/<image>")
-def get_image(image):
-    return send_from_directory("./gallery", image + ".webp")
+        if edited_image is None:
+            raise Exception("No edited image generated")
 
-@app.route("/kuvagen/images")
-def images():
-    gallery_json = "gallery.json"
-    if not os.path.exists(gallery_json):
-        return jsonify([])
-    with open(gallery_json, 'r') as file:
-        images = json.load(file)
-    return jsonify(images)
+        # Save image
+        image_name = save_image(user_id, edited_image, prompt, parent_image)
+        increment_user_count(user_id)
 
-def get_sorted_images_by_date(folder_path):
-    files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
-    files.sort(key=lambda f: os.path.getmtime(os.path.join(folder_path, f)))
-    return files
+        return jsonify({"image": image_name, "prompt": prompt})
 
-def get_previous_image(folder_path, file_name):
-    files = get_sorted_images_by_date(folder_path)
-    index = files.index(file_name)
-    if index == 0:
-        return None
-    return files[index - 1]
+def poll_task_completion(user_id: str, task_id: str, prompt: str, parent: Optional[str]):
+    """Poll backend task until completion"""
+    max_polls = 120  # 2 minutes max
+    poll_count = 0
 
-def random_image_name(prompt, length=6):
+    while poll_count < max_polls:
+        try:
+            response = requests.get(f"{BACKEND_URL}/task_status/{task_id}", timeout=5)
+            status_data = response.json()
+
+            status = status_data["status"]
+
+            if status == "queued":
+                position = status_data.get("position", 0)
+                socketio.emit("status", f"In queue, position: {position + 1}")
+            elif status == "processing":
+                progress = status_data.get("progress")
+                if progress:
+                    step = progress["step"]
+                    total = progress["total_steps"]
+                    socketio.emit("status", f"Generating, Step {step}/{total}")
+
+                # Send preview if available
+                preview = status_data.get("preview")
+                if preview:
+                    socketio.emit("image_progress", preview)
+            elif status == "completed":
+                result = status_data["result"]
+                image_base64 = result["image_base64"]
+
+                # Decode and save image
+                image_data = base64.b64decode(image_base64)
+                image = Image.open(io.BytesIO(image_data))
+
+                image_name = save_image(user_id, image, prompt, parent)
+                increment_user_count(user_id)
+
+                return jsonify({"image": image_name, "prompt": prompt})
+            elif status == "error":
+                error = status_data.get("error", "Unknown error")
+                return jsonify({"error": error})
+
+        except Exception as e:
+            print(f"Error polling task: {e}")
+
+        time.sleep(1)
+        poll_count += 1
+
+    return jsonify({"error": "Task timeout"})
+
+def previous_image(user_id: str, image_name: str):
+    """Go to previous image in history"""
+    user_data = get_or_create_session(user_id)
+    gallery = user_data["gallery"]
+
+    # Find current image in gallery
+    for img_data in gallery:
+        if img_data["name"] == image_name:
+            if img_data["parent"]:
+                # Return parent
+                for parent_data in gallery:
+                    if parent_data["name"] == img_data["parent"]:
+                        return jsonify({
+                            "image": parent_data["name"],
+                            "prompt": parent_data["prompt"],
+                            "action": "undo"
+                        })
+
+    return jsonify({"error": "No previous image"})
+
+def random_image_name(prompt: str, length: int = 6) -> str:
+    """Generate random image name"""
     words = prompt.split()[:4]
     words = "-".join(words)
     random_name = ''.join(random.choices(string.ascii_letters, k=length))
     return words + "-" + random_name
 
-def save_image(image, prompt, parent=None):
-    if not os.path.exists("./gallery"):
-        os.makedirs("./gallery")
-    if not os.path.exists("./gallery/thumbnails"):
-        os.makedirs("./gallery/thumbnails")
+def save_image(user_id: str, image: Image.Image, prompt: str, parent: Optional[str]) -> str:
+    """Save image to user's gallery"""
+    user_data = get_or_create_session(user_id)
+
+    # Create directories
+    gallery_dir = f"./gallery/{user_id}"
+    os.makedirs(gallery_dir, exist_ok=True)
+    os.makedirs(f"{gallery_dir}/thumbnails", exist_ok=True)
+
+    # Generate name
     image_name = random_image_name(prompt)
-    image.save(f"./gallery/{image_name}.webp")
-    image = image.resize((256, 256), Image.Resampling.LANCZOS)
-    image.save(f"./gallery/thumbnails/{image_name}.webp")
-    add_to_json_file(image_name, prompt, parent)
+
+    # Save full image
+    image.save(f"{gallery_dir}/{image_name}.webp")
+
+    # Save thumbnail
+    thumb = image.resize((256, 256), Image.Resampling.LANCZOS)
+    thumb.save(f"{gallery_dir}/thumbnails/{image_name}.webp")
+
+    # Add to user's gallery
+    user_data["gallery"].append({
+        "name": image_name,
+        "prompt": prompt,
+        "parent": parent,
+        "created_at": datetime.now().isoformat()
+    })
+
+    # Also save to global gallery.json for compatibility
+    add_to_global_gallery(user_id, image_name, prompt, parent)
+
     return image_name
 
-def add_to_json_file(name, prompt, parent):
+def add_to_global_gallery(user_id: str, name: str, prompt: str, parent: Optional[str]):
+    """Add to global gallery.json (for backward compatibility)"""
     filename = "gallery.json"
     if not os.path.exists(filename):
         with open(filename, 'w') as file:
             json.dump([], file)
+
     with open(filename, 'r') as file:
         data = json.load(file)
+
     new_entry = {
         "name": name,
         "prompt": prompt,
-        "parent": parent
+        "parent": parent,
+        "user_id": user_id,
+        "created_at": datetime.now().isoformat()
     }
     data.append(new_entry)
+
     with open(filename, 'w') as file:
         json.dump(data, file, indent=4)
 
-@app.route("/kuvagen/")
-def index():
-    return render_template("index.html")
+def get_saved_image(user_id: str, image_name: str) -> Image.Image:
+    """Retrieve saved image"""
+    # Try user's gallery first
+    path = f"./gallery/{user_id}/{image_name}.webp"
+    if os.path.exists(path):
+        return Image.open(path)
+
+    # Fall back to global gallery
+    path = f"./gallery/{image_name}.webp"
+    if os.path.exists(path):
+        return Image.open(path)
+
+    raise Exception(f"Image not found: {image_name}")
+
+@app.route("/kuvagen/gallery")
+def get_gallery_json():
+    """Get user's gallery as JSON"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+    return jsonify(user_data["gallery"])
+
+@app.route("/kuvagen/images/<image>")
+def get_image(image):
+    """Serve image file"""
+    user_id = get_user_id()
+
+    # Try user's gallery
+    user_path = f"./gallery/{user_id}"
+    if os.path.exists(f"{user_path}/{image}.webp"):
+        return send_from_directory(user_path, f"{image}.webp")
+
+    # Fall back to global gallery
+    return send_from_directory("./gallery", f"{image}.webp")
+
+@app.route("/kuvagen/images")
+def images():
+    """Get user's images"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+    return jsonify(user_data["gallery"])
 
 if __name__ == "__main__":
     print("Server started, ready to go!")
-    threading.Thread(target=periodic_ollama_loader, daemon=True).start()
     socketio.run(app, host="0.0.0.0", port=5001, debug=False)

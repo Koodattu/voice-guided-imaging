@@ -21,10 +21,6 @@ Based on the command, output a JSON object with exactly two keys: `action` and `
 
 ---
 
-## Additional Rule:
-
-If the user requests a new video, treat it as `create` and generate an image instead. Craft the `prompt` for image generation based on their description.
-
 ---
 
 ## Rules for generating the `prompt`:
@@ -62,7 +58,6 @@ Do not return any additional text.
 | "replace the mountain with a city skyline" | { "action": "edit", "prompt": "replace mountain with city skyline" } |
 | "remove the tree from the picture" | { "action": "edit", "prompt": "remove the tree" } |
 | "go back" | { "action": "undo", "prompt": "Reverting last action" } |
-| "generate video from this" | { "action": "create", "prompt": "scene described in current image" } |
 | "what is 2+2" | { "action": "error", "prompt": "Command was not recognized as suitable" } |
 
 ---

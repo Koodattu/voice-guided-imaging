@@ -1,92 +1,297 @@
-<div align="center">
+# Voice-Guided AI Imaging Platform
 
-<img src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png" style="height: 200px;" />
-    
-</div>
+A web-based AI imaging platform that allows users to create and edit images using voice commands. The system supports both local and cloud-based processing with intelligent session management and queue systems.
 
-<h1 align="center">Voice Guided Imaging</h1>
+## Architecture
 
-<div align="center">
+The system has been completely refactored into a two-server architecture:
 
-**Voice Guided Imaging is a demo by GPT Lab Seinäjoki -project. This demo focuses on speech-to-text and translation, intention recognition, image generation, image editing and video generation. The goal of the project is to showcase multiple different locally-hosted generative artificial intelligences in a single demo project.**
+### 1. **Main Server (`main.py`)** - Lightweight Web Server & Relay
 
-</div>
+- Hosts the web interface (`index.html`)
+- Manages user sessions and authentication
+- Enforces image generation limits
+- Routes requests to either local backend or cloud services
+- Handles WebSocket connections for real-time updates
+- **Runs on**: Any machine, minimal resources needed
+- **Port**: 5001
 
-<div align="center">
+### 2. **Backend Server (`backend.py`)** - Heavy Inference Processing
 
-<a target="_blank" href="https://epliitto.fi/en/" style="background:none;text-decoration: none;">
-    <img src="https://epliitto.fi/wp-content/uploads/2020/12/EPLiitto_merkki_vari.png" style="height: 50px;" />
-</a>
-<a target="_blank" href="https://gpt-lab.eu/" style="background:none;text-decoration: none;">
-    <img src="https://gpt-lab.eu/wp-content/uploads/2023/08/cropped-cropped-GPTlab_logo1-2-1.png" style="height: 50px;" />
-</a>
-<a target="_blank" href="https://www.ucs.fi/en/front-page/" style="background:none;text-decoration: none;">
-    <img src="https://www.ucs.fi/wp-content/themes/ucs/documents/UCS-LOGOPAKETTI/Pysty/JPG-PNG/ucs_logo_pysty_musta.jpg" style="height: 50px;" />
-</a>
+- Runs local AI models (Whisper, LLM, Image Generation/Editing)
+- Implements queue system for image generation tasks
+- Provides REST API endpoints
+- Handles concurrent requests efficiently
+- **Runs on**: Powerful machine with GPU
+- **Port**: 8000
 
----
+## Key Features
 
-## Click On The Image To See The Demo In Action!
-[![Youtube Video](https://img.youtube.com/vi/iz3YnmFWz6s/0.jpg)](https://www.youtube.com/watch?v=iz3YnmFWz6s)
+### Session Management
 
-</div>
+- **User Identification**: Users are identified by IP + User Agent hash
+- **Image Limits**: Configurable limit (default: 10 images) before login required
+- **Persistent Gallery**: User's images persist across sessions
+- **Concurrent Users**: Multiple users can use the system simultaneously
 
----
+### Processing Modes
 
-## Technical Breakdown
-- All the models are hosted locally
-- [OpenAI Whisper](https://github.com/openai/whisper) is used for speech-to-text and translation
-- [Mistral Instruct](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3) is used for intention recognition and modifying the users command into a prompt for image generation and editing
-- [Ollama](https://ollama.com/) for hosting Mistral
-- [SDXL-Lightning](https://huggingface.co/ByteDance/SDXL-Lightning) for fast image generation
-- [Instruct-Pix2Pix](https://huggingface.co/timbrooks/instruct-pix2pix) for image editing
-- [Stable Video Diffusion](https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1) for image generation
-- [Python](https://www.python.org/) and [Flask](https://flask.palletsprojects.com/en/3.0.x/) to tie it all together
+#### Cloud Mode
 
-## How To Setup And Run The Demo
+- Uses OpenAI Whisper for transcription
+- Uses OpenAI GPT-4 or Google Gemini for LLM
+- Uses DALL-E 3 or Gemini for image generation/editing
+- **No queuing** - all users get instant access to cloud services
+- **No local backend required**
 
-**Please keep in mind that you will need a lot of RAM, VRAM and a powerful GPU to run all of these models. This demo was developed and the video was recorded with the models running on a RTX 4090.**
+#### Local Mode (Fast)
 
-1. Download and install [Ollama](https://ollama.com/)
-2. Download Mistral Instruct using Ollama
+- Uses Faster-Whisper for transcription (instant)
+- Uses Ollama for LLM (instant with queue)
+- Uses SDXL-Lightning for fast image generation (4 steps)
+- Uses Instruct-Pix2Pix for fast image editing
+- **Queue system** for image generation (one at a time)
+
+#### Local Mode (Quality)
+
+- Same transcription and LLM as Local Fast
+- Uses SDXL-Lightning for image generation (8 steps)
+- Uses COSXL-Edit for higher quality image editing
+- **Queue system** with position tracking and progress updates
+
+### Queue System
+
+- Single image generation/editing task processed at a time
+- Queue position displayed to users
+- Real-time progress updates with partial image previews
+- Task status: `queued` → `processing` → `completed`
+
+### User Interface
+
+- **Push-to-Talk Only**: Hold SPACE bar to record voice command
+- **No VAD (Voice Activity Detection)**: Simplified, more reliable
+- **No Video Generation**: Removed to streamline the system
+- **Gallery View**: Browse all generated images with download buttons
+- **Tree Chart View**: Visualize image evolution history
+- **Session Info**: Display user's image count and limits
+
+## Installation
+
+### Main Server Setup
+
+1. **Clone the repository**
+
+   ```bash
+   git clone <repository-url>
+   cd voice-guided-imaging
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   pip install -r requirements-main.txt
+   ```
+
+3. **Configure environment**
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys and configuration
+   ```
+
+4. **Run the main server**
+
+   ```bash
+   python main.py
+   ```
+
+   The web interface will be available at `http://localhost:5001/kuvagen/`
+
+### Backend Server Setup (Optional - for local inference)
+
+1. **On your powerful GPU machine**
+
+   ```bash
+   cd voice-guided-imaging
+   pip install -r requirements-backend.txt
+   ```
+
+2. **Configure environment**
+
+   - Set `BACKEND_URL` in main server's `.env` to point to this machine
+   - Set `HUGGINGFACE_TOKEN` for model downloads
+   - Configure Ollama for local LLM
+
+3. **Run the backend server**
+
+   ```bash
+   python backend.py
+   ```
+
+   The backend API will be available at `http://localhost:8000`
+
+## Configuration
+
+### Environment Variables
+
+| Variable                   | Description                           | Default                        |
+| -------------------------- | ------------------------------------- | ------------------------------ |
+| `OPENAI_API_KEY`           | OpenAI API key for cloud services     | Required for cloud mode        |
+| `GEMINI_API_KEY`           | Google Gemini API key                 | Required for Google cloud mode |
+| `HUGGINGFACE_TOKEN`        | HuggingFace token for model downloads | Required for local mode        |
+| `BACKEND_URL`              | URL of backend server                 | `http://localhost:8000`        |
+| `CLOUD_PROVIDER`           | Cloud provider (`openai` or `google`) | `google`                       |
+| `MAX_IMAGES_WITHOUT_LOGIN` | Image limit per user                  | `10`                           |
+| `LOCAL_MODEL_SIZE`         | Whisper model size                    | `turbo`                        |
+| `OLLAMA_MODEL`             | Ollama LLM model                      | See .env.example               |
+
+### Deployment
+
+#### Production Deployment
+
+**Main Server (Web Hosting)**:
+
+- Deploy to any web server (AWS, Google Cloud, Heroku, etc.)
+- Minimal resources needed (1-2 GB RAM, 1 CPU)
+- Use a proper WSGI server like Gunicorn:
+  ```bash
+  gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:5001 main:app
+  ```
+
+**Backend Server (GPU Machine)**:
+
+- Deploy to GPU-enabled server (AWS EC2 with GPU, Google Cloud with GPU)
+- Recommended: 16+ GB RAM, NVIDIA GPU with 8+ GB VRAM
+- Run with Uvicorn:
+  ```bash
+  uvicorn backend:app --host 0.0.0.0 --port 8000 --workers 1
+  ```
+
+## Usage
+
+1. **Select Language**: Choose Auto, English, or Finnish
+2. **Select Processing Mode**:
+   - Local (Fast): Quick local processing
+   - Local (Quality): Better quality, slower
+   - Cloud: OpenAI/Google cloud services
+3. **Hold SPACE bar** and speak your command
+4. **Release SPACE** to process
+5. **Commands**:
+   - "Create a new image of a sunset"
+   - "Edit the image to add mountains"
+   - "Make it look like nighttime"
+   - "Go back to the previous image"
+
+## API Endpoints
+
+### Main Server
+
+- `GET /kuvagen/` - Web interface
+- `GET /kuvagen/api/check_backend` - Check backend availability
+- `GET /kuvagen/api/session_info` - Get user session info
+- `POST /kuvagen/process_command` - Process voice command
+- `GET /kuvagen/gallery` - Get user's gallery JSON
+- `GET /kuvagen/images/<image>` - Serve image file
+- `WebSocket /kuvagen/socket.io` - Real-time updates
+
+### Backend Server
+
+- `GET /health` - Health check
+- `POST /transcribe` - Transcribe audio
+- `POST /llm` - Process LLM request
+- `POST /generate_image` - Queue image generation
+- `POST /edit_image` - Queue image editing
+- `GET /task_status/{task_id}` - Get task status
+
+## Project Structure
+
 ```
-ollama pull mistral
+voice-guided-imaging/
+├── main.py                      # Lightweight web server & relay
+├── backend.py                   # Heavy inference server
+├── index.html                   # Web frontend (simplified)
+├── requirements-main.txt        # Main server dependencies
+├── requirements-backend.txt     # Backend server dependencies
+├── .env.example                 # Environment configuration template
+├── intention_recognition_prompt_v3_no_video.txt  # LLM system prompt
+├── gallery/                     # User images (per-user folders)
+│   ├── {user_id}/
+│   │   ├── {image}.webp
+│   │   └── thumbnails/
+│   └── gallery.json            # Global gallery (backward compat)
+└── cache/                       # Model cache directory
 ```
-2. Clone the GitHub repository
-```
-git clone https://github.com/Koodattu/ucs-llm-voice-image-edit.git
-```
-3. Create and activate Python virtual environment
-```
-python -m venv venv
-./venv/scripts/activate
-```
-4. Install dependencies with pip
-```
-pip install -r requirements.txt
-```
-5. Run the script:
-```
-python main.py
-```
-6. The app is hosted on http://localhost:5001/
-7. Change the settings at the top of the page to fit your preferences
 
-**NOTE:** The app downloads different models as needed, so the first start and the first generations are going to be slow, as we need to download the whisper model, sdxl-lightning model, instruct-pix2pix model and the stable video diffusion model.
+## Troubleshooting
 
-## Application Logic Explained
-1. The default microphone is used to record voice audio with push-to-talk and voice-activity-detection functionality.
-2. The audio is transcribed and translated to english (if necessary)
-3. An LLM is used to turn the natural language input into a command
-4. The LLM is used to infer the intended action from the input and it modifies the prompt to be more fit for image generation or editing
-6. The image is generated or edited
+### Backend Not Available
 
-## About Inferring The Intention And Possible Actions
-The following actions are currently possible
-- Generate a new image
-- Edit the current image
-- Go back to the previous image
-- Generate a video from the current image
+- Ensure backend server is running and accessible
+- Check `BACKEND_URL` in main server's `.env`
+- System automatically falls back to cloud mode if backend unavailable
 
-## Licenses etc.
-TBD
+### Image Limit Reached
+
+- Users hit the `MAX_IMAGES_WITHOUT_LOGIN` limit
+- Increase limit in `.env` or implement user authentication
+
+### Slow Image Generation
+
+- Check queue position in UI
+- Only one image generated at a time in local mode
+- Consider using cloud mode for multiple concurrent users
+
+### Gallery Not Loading
+
+- Check user session is active
+- Verify gallery directory permissions
+- Check browser console for errors
+
+## Performance Considerations
+
+### Cloud Mode
+
+- ✅ No queuing or waiting
+- ✅ Works for unlimited concurrent users
+- ❌ Costs money per request
+- ❌ Slower than local in some cases
+
+### Local Mode
+
+- ✅ Free after setup
+- ✅ Fast transcription (Faster-Whisper)
+- ✅ Fast LLM (Ollama with queue)
+- ⚠️ Image generation queued (one at a time)
+- ⚠️ Requires powerful GPU machine
+- ❌ Queue builds up with many users
+
+## License
+
+See LICENSE file for details.
+
+## Contributing
+
+Contributions welcome! Please ensure:
+
+1. Session handling works correctly for concurrent users
+2. Queue system maintains order
+3. No mixing of data between users
+4. Gallery and tree view work with user-specific data
+
+## Changelog
+
+### Version 2.0 (Current)
+
+- Complete architectural rework
+- Separated main server and backend server
+- Implemented session management with user IDs
+- Added image generation limits
+- Implemented queue system for local inference
+- Removed VAD (Voice Activity Detection)
+- Removed video generation
+- Push-to-talk only mode
+- Per-user gallery persistence
+- Download buttons in gallery
+- Concurrent user support
+- Cloud services work simultaneously for all users
+- Local services queued appropriately
