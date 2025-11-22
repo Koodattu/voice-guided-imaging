@@ -414,12 +414,13 @@ def handle_full_audio_data(data):
             audio_bytes = base64.b64decode(data)
 
             # Save temporarily in temp_audio directory
+            # Use .bin extension initially, OpenAI Whisper can handle various formats
             temp_path = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.webm")
             try:
                 with open(temp_path, "wb") as f:
                     f.write(audio_bytes)
 
-                # Transcribe with OpenAI
+                # Transcribe with OpenAI (it auto-detects format)
                 with open(temp_path, "rb") as audio_file:
                     response = OPENAI_CLIENT.audio.transcriptions.create(
                         model="whisper-1",

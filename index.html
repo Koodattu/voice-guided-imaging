@@ -968,9 +968,13 @@
               return;
             }
 
-            const blob = new Blob(audioChunks, { type: "audio/webm" });
+            // Use the MediaRecorder's actual MIME type instead of forcing webm
+            const mimeType = mediaRecorder.mimeType || "audio/webm";
+            const blob = new Blob(audioChunks, { type: mimeType });
             const chunks = audioChunks.slice(); // Copy before clearing
             audioChunks = [];
+
+            console.log(`Creating blob with MIME type: ${mimeType}, size: ${blob.size} bytes`);
 
             const reader = new FileReader();
             reader.readAsDataURL(blob);

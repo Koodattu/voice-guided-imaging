@@ -236,34 +236,40 @@ async def transcribe_audio(request: TranscribeRequest):
         # Decode base64 audio
         audio_data = base64.b64decode(request.audio_base64)
 
-        # Save temporarily in temp_audio directory
-        # Try to detect format - if it's already WAV, use it directly
-        temp_audio = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
+        # Save temporarily in temp_audio directory with a generic extension first
+        temp_audio = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.bin")
 
         with open(temp_audio, "wb") as f:
             f.write(audio_data)
 
-        # Try to load the audio - it might be WAV or webm
-        try:
-            audio = AudioSegment.from_file(temp_audio, format="wav")
-        except:
-            # If WAV fails, try webm
-            os.remove(temp_audio)
-            temp_audio = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.webm")
-            with open(temp_audio, "wb") as f:
-                f.write(audio_data)
-            audio = AudioSegment.from_file(temp_audio, format="webm")
+        # Try to load the audio - try multiple formats
+        audio = None
+        tried_formats = []
+
+        for fmt in ["webm", "ogg", "wav", "mp4", "m4a"]:
+            try:
+                audio = AudioSegment.from_file(temp_audio, format=fmt)
+                print(f"Successfully loaded audio as {fmt}")
+                break
+            except Exception as e:
+                tried_formats.append(fmt)
+                continue
+
+        if audio is None:
+            # Last resort: try without specifying format (let pydub detect)
+            try:
+                audio = AudioSegment.from_file(temp_audio)
+                print(f"Successfully loaded audio with auto-detection")
+            except Exception as e:
+                raise Exception(f"Failed to load audio. Tried formats: {tried_formats}. Error: {str(e)}")
 
         # Check audio length
         if len(audio) < 500:  # Reduced from 2000ms to 500ms for partial transcriptions
             return {"transcription": "", "error": "Audio too short"}
 
-        # Convert to wav if needed
-        if not temp_audio.endswith('.wav'):
-            temp_wav = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
-            audio.export(temp_wav, format="wav")
-        else:
-            temp_wav = temp_audio
+        # Convert to wav for Whisper
+        temp_wav = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
+        audio.export(temp_wav, format="wav")
 
         # Transcribe with lock
         with whisper_lock:
@@ -289,10 +295,11 @@ async def transcribe_audio(request: TranscribeRequest):
                 os.remove(temp_audio)
             except Exception as e:
                 print(f"Error removing temp audio: {e}")
-        if temp_wav and temp_wav != temp_audio and os.path.exists(temp_wav):
+        if temp_wav and os.path.exists(temp_wav):
             try:
                 os.remove(temp_wav)
             except Exception as e:
+                print(f"Error removing temp wav: {e}")
                 print(f"Error removing temp wav: {e}")
 
 # LLM endpoint
