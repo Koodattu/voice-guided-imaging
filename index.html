@@ -659,6 +659,7 @@
       let analyser = null;
       let audioLevelCheckInterval = null;
       let myvad = null; // VAD instance for partial transcriptions
+      let recordingStartTime = null; // Track when recording started
 
       // Get or create user ID from localStorage
       function getUserId() {
@@ -760,6 +761,7 @@
           system_status.textContent = data;
           backendProcessing = false;
           shouldClearTranscription = true;
+          spinner_cont.style.display = "none";
           updateMicStatus();
         });
 
@@ -960,13 +962,21 @@
           };
 
           mediaRecorder.onstop = () => {
+            // Only process if we have chunks (not cancelled)
+            if (audioChunks.length === 0) {
+              console.log("No audio chunks to process");
+              return;
+            }
+
             const blob = new Blob(audioChunks, { type: "audio/webm" });
+            const chunks = audioChunks.slice(); // Copy before clearing
             audioChunks = [];
 
             const reader = new FileReader();
             reader.readAsDataURL(blob);
             reader.onloadend = () => {
               const base64 = reader.result.split(",")[1];
+              console.log("Sending full audio data to server");
               socket.emit("full_audio_data", base64);
             };
           };
@@ -999,6 +1009,7 @@
         isSpacePressed = true;
         isRecording = true;
         hasAudioData = false; // Reset audio data flag
+        recordingStartTime = Date.now(); // Track start time
 
         if (shouldClearTranscription) {
           transcription.value = "";
@@ -1015,7 +1026,6 @@
         // Start MediaRecorder for full audio
         mediaRecorder.start();
         system_status.textContent = "Recording...";
-        //mic_help.textContent = "Release spacebar";
 
         // Start real-time audio level monitoring
         startAudioLevelMonitoring();
@@ -1027,8 +1037,11 @@
       function stopRecording() {
         isSpacePressed = false;
         isRecording = false;
+
+        const recordingDuration = recordingStartTime ? Date.now() - recordingStartTime : 0;
         const hadAudioData = hasAudioData; // Store the state before resetting
         hasAudioData = false; // Reset audio data flag
+        recordingStartTime = null; // Reset start time
 
         // Stop audio level monitoring
         stopAudioLevelMonitoring();
@@ -1039,24 +1052,36 @@
           console.log("VAD paused");
         }
 
-        // Stop MediaRecorder after a short delay to capture final audio
-        setTimeout(() => {
-          mediaRecorder.stop();
-        }, 500);
-
-        // Immediately transition to processing state if we had audio
-        if (hadAudioData) {
-          backendProcessing = true;
-          system_status.textContent = "Processing audio...";
-          mic_status_box.style.boxShadow = "";
-        } else {
-          system_status.textContent = "No audio detected";
-        }
-
         mic_help.textContent = "Hold spacebar";
 
-        // Update status and remove visual feedback
+        // Check minimum duration (0.5 seconds = 500ms)
+        if (recordingDuration < 500) {
+          console.log(`Recording too short: ${recordingDuration}ms (minimum 500ms)`);
+          system_status.textContent = "Recording too short, try again";
+          // Cancel the recording
+          if (mediaRecorder && mediaRecorder.state === "recording") {
+            mediaRecorder.stop();
+          }
+          audioChunks = []; // Clear chunks
+          updateMicStatus();
+          return;
+        }
+
+        // Immediately transition to processing state
+        backendProcessing = true;
+        system_status.textContent = "Processing audio...";
+        spinner_cont.style.display = "flex";
+        mic_status_box.style.boxShadow = "";
         updateMicStatus();
+
+        console.log(`Recording duration: ${recordingDuration}ms - processing...`);
+
+        // Stop MediaRecorder after a short delay to capture final audio
+        setTimeout(() => {
+          if (mediaRecorder && mediaRecorder.state === "recording") {
+            mediaRecorder.stop();
+          }
+        }, 100);
       }
 
       function updateMicStatus() {
@@ -1064,13 +1089,15 @@
         const mic_icon_open = document.getElementById("mic_icon_open");
         let status = "Unknown";
 
-        // Reset styles
-        mic_status_box.style = "";
+        // Reset styles first
+        mic_status_box.style.color = "";
+        mic_status_box.style.borderColor = "";
+        mic_status_box.style.boxShadow = "";
 
         if (backendProcessing) {
           status = "Processing";
-          // Remove box shadow during processing
-          mic_status_box.style.boxShadow = "";
+          mic_status_box.style.color = "yellow";
+          mic_status_box.style.borderColor = "yellow";
         } else if (isRecording) {
           status = "Listening";
           // Only add reactive box shadow when actual audio is detected
