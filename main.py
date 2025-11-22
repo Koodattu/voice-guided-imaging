@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from threading import Thread, Lock
 
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, session
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room
 from flask_cors import CORS
 from PIL import Image
 from dotenv import load_dotenv
@@ -28,6 +28,7 @@ import requests
 from pydub import AudioSegment
 from pydantic import BaseModel
 import socketio as socketio_client
+import tempfile
 
 # Load environment
 load_dotenv()
@@ -239,15 +240,37 @@ def connect_to_backend_socket():
 
             @backend_sio.on('image_processing_completed')
             def on_processing_completed(data):
-                """Relay completion event to frontend"""
+                """Handle completion event - save image and notify frontend"""
                 task_id = data.get('task_id')
                 result = data.get('result')
                 session_id = find_session_for_task(task_id)
-                if session_id:
-                    socketio.emit('backend_completed', {
-                        'task_id': task_id,
-                        'result': result
-                    }, room=session_id)
+
+                if session_id and result and 'image_base64' in result:
+                    # Get user session data
+                    user_data = user_sessions.get(session_id)
+                    if user_data:
+                        # Decode and save image
+                        image_data = base64.b64decode(result['image_base64'])
+                        image = Image.open(io.BytesIO(image_data))
+
+                        # Get prompt and parent from session
+                        prompt = user_data.get('pending_prompt', 'Generated image')
+                        parent = user_data.get('pending_parent')
+
+                        # Save image
+                        image_name = save_image(session_id, image, prompt, parent)
+                        increment_user_count(session_id)
+
+                        # Clear pending data
+                        user_data.pop('current_task_id', None)
+                        user_data.pop('pending_prompt', None)
+                        user_data.pop('pending_parent', None)
+
+                        # Emit final result to frontend client
+                        socketio.emit('image_ready', {
+                            'image': image_name,
+                            'prompt': prompt
+                        }, room=session_id)
 
             @backend_sio.on('image_processing_error')
             def on_processing_error(data):
@@ -323,38 +346,12 @@ def api_session_info():
 def handle_connect():
     """Handle client connection"""
     print(f'Client connected')
-    emit("status", "Connected to server! Ready to go!")
-
-@socketio.on('backend_image_ready')
-def handle_backend_image_ready(data):
-    """Handle image completion from backend via socket events"""
+    # Join user to their room if they have a user_id
     user_id = get_user_id()
-    user_data = get_or_create_session(user_id)
-
-    result = data.get('result')
-    if result and 'image_base64' in result:
-        # Decode and save image
-        image_data = base64.b64decode(result['image_base64'])
-        image = Image.open(io.BytesIO(image_data))
-
-        # Get prompt and parent from session
-        prompt = user_data.get('pending_prompt', 'Generated image')
-        parent = user_data.get('pending_parent')
-
-        # Save image
-        image_name = save_image(user_id, image, prompt, parent)
-        increment_user_count(user_id)
-
-        # Clear pending data
-        user_data.pop('current_task_id', None)
-        user_data.pop('pending_prompt', None)
-        user_data.pop('pending_parent', None)
-
-        # Emit final result to client
-        emit('image_ready', {
-            'image': image_name,
-            'prompt': prompt
-        })
+    if user_id:
+        join_room(user_id)
+        print(f'User {user_id} joined room')
+    emit("status", "Connected to server! Ready to go!")
 
 @socketio.on('user_id')
 def handle_user_id(data):
@@ -362,6 +359,8 @@ def handle_user_id(data):
     if data:
         session['user_id'] = data
         user_data = get_or_create_session(data)
+        # Join user to their own room for targeted emissions
+        join_room(data)
         print(f'User ID set: {data}, images generated: {user_data["images_generated"]}')
 
 @socketio.on("lang_select")
@@ -452,8 +451,8 @@ def handle_full_audio_data(data):
         print(f"Transcription error: {e}")
         emit("error", f"Transcription error: {str(e)}")
 
-@socketio.on("partial_audio_data")
-def handle_partial_audio_data(data):
+@socketio.on("audio_data")
+def handle_audio_data(data):
     """Handle partial audio transcription for live feedback"""
     user_id = get_user_id()
     user_data = get_or_create_session(user_id)
@@ -476,48 +475,38 @@ def handle_partial_audio_data(data):
             if not result.get("error"):
                 transcription = result.get("transcription", "")
                 if transcription and transcription.strip():
+                    print(f"Partial transcription: {transcription}")
                     emit("transcription", transcription)
 
         elif "cloud" in selected_model:
             # Use cloud transcription
             audio_bytes = base64.b64decode(data)
 
-            # Check if audio is too small
-            if len(audio_bytes) < 1000:  # Less than 1KB, probably too short
-                return
-
-            # Save temporarily
-            temp_path = f"temp_partial_{user_id}_{uuid.uuid4()}.webm"
-            with open(temp_path, "wb") as f:
-                f.write(audio_bytes)
-
-            # Check audio duration before transcribing
+            # Save temporarily in temp_audio directory
+            temp_path = os.path.join(TEMP_AUDIO_DIR, f"temp_partial_{user_id}_{uuid.uuid4()}.wav")
             try:
-                audio_segment = AudioSegment.from_file(temp_path)
-                if len(audio_segment) < 500:  # Less than 500ms
-                    os.remove(temp_path)
-                    return
-            except:
-                # If we can't read the audio, skip it
+                with open(temp_path, "wb") as f:
+                    f.write(audio_bytes)
+
+                with open(temp_path, "rb") as audio_file:
+                    response = OPENAI_CLIENT.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        response_format="text",
+                        language=language if language else None
+                    )
+                    transcription = response if isinstance(response, str) else response.text
+
+                    if transcription and transcription.strip():
+                        print(f"Partial transcription: {transcription}")
+                        emit("transcription", transcription)
+            finally:
+                # Clean up temp file
                 if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                return
-
-            # Transcribe with OpenAI
-            with open(temp_path, "rb") as audio_file:
-                response = OPENAI_CLIENT.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language=language,
-                    response_format="text"
-                )
-            transcription = response
-
-            # Cleanup
-            os.remove(temp_path)
-
-            if transcription and transcription.strip():
-                emit("transcription", transcription)
+                    try:
+                        os.remove(temp_path)
+                    except:
+                        pass
 
     except Exception as e:
         # Silently fail for partial transcriptions

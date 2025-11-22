@@ -867,8 +867,7 @@
 
         socket.on("backend_completed", async (data) => {
           console.log("Backend completed:", data);
-          // Process the completed image via backend_image_ready
-          socket.emit("backend_image_ready", data);
+          // Image is now processed server-side, just wait for image_ready event
         });
 
         socket.on("backend_error", (data) => {
@@ -1016,7 +1015,7 @@
         // Start MediaRecorder for full audio
         mediaRecorder.start();
         system_status.textContent = "Recording...";
-        mic_help.textContent = "Release spacebar";
+        //mic_help.textContent = "Release spacebar";
 
         // Start real-time audio level monitoring
         startAudioLevelMonitoring();
@@ -1028,6 +1027,7 @@
       function stopRecording() {
         isSpacePressed = false;
         isRecording = false;
+        const hadAudioData = hasAudioData; // Store the state before resetting
         hasAudioData = false; // Reset audio data flag
 
         // Stop audio level monitoring
@@ -1044,7 +1044,14 @@
           mediaRecorder.stop();
         }, 500);
 
-        system_status.textContent = "Processing audio...";
+        // If we had audio data, immediately transition to processing state
+        if (hadAudioData) {
+          backendProcessing = true;
+          system_status.textContent = "Processing audio...";
+        } else {
+          system_status.textContent = "Processing audio...";
+        }
+
         mic_help.textContent = "Hold spacebar";
 
         // Update status and remove visual feedback

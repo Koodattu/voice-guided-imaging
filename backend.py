@@ -470,6 +470,20 @@ def generate_image_internal(prompt: str, num_steps: int, guidance_scale: float, 
 
 def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: str, session_id: Optional[str] = None):
     """Internal image editing with progress updates"""
+    def latents_to_rgb(latents):
+        """Convert latents to RGB for preview"""
+        weights = (
+            (60, -60, 25, -70),
+            (60,  -5, 15, -50),
+            (60,  10, -5, -35)
+        )
+        weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
+        biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
+        rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
+        image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
+        image_array = image_array.transpose(1, 2, 0)
+        return Image.fromarray(image_array)
+
     def progress_callback(pipe, step: int, timestep: int, callback_kwargs: dict):
         progress_data = None
         if model == "fast":
@@ -487,19 +501,33 @@ def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: st
                 'progress': progress_data
             }, room=session_id))
 
-        # Generate preview for slow model
-        if model == "slow" and step % 5 == 0:
-            latents = callback_kwargs.get("latents")
-            if latents is not None:
-                with torch.no_grad():
-                    latents_scaled = (1 / 0.18215) * latents
-                    image_tensor = sd_cosxl_img2img.vae.decode(latents_scaled).sample
-                    image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-                    image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-                    pil_images = sd_cosxl_img2img.numpy_to_pil(image_array)
+        # Generate preview images
+        latents = callback_kwargs.get("latents")
+        if latents is not None:
+            generate_preview = False
+
+            if model == "fast" and step % 2 == 0:  # Every 2 steps for fast model
+                generate_preview = True
+            elif model == "slow" and step % 2 == 0:  # Every 2 steps for slow model
+                generate_preview = True
+
+            if generate_preview:
+                try:
+                    if model == "fast":
+                        # Use latents_to_rgb for fast model
+                        preview_image = latents_to_rgb(latents)
+                    else:
+                        # Use VAE decode for slow model
+                        with torch.no_grad():
+                            latents_scaled = (1 / 0.18215) * latents
+                            image_tensor = sd_cosxl_img2img.vae.decode(latents_scaled).sample
+                            image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+                            image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+                            pil_images = sd_cosxl_img2img.numpy_to_pil(image_array)
+                            preview_image = pil_images[0]
 
                     buffered = io.BytesIO()
-                    pil_images[0].save(buffered, format="PNG")
+                    preview_image.save(buffered, format="PNG")
                     preview_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
                     with image_queue_lock:
@@ -511,8 +539,51 @@ def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: st
                             'task_id': task_id,
                             'preview': preview_base64
                         }, room=session_id))
+                except Exception as e:
+                    print(f"Preview generation error: {e}")
 
         return callback_kwargs
+
+    def progress_callback_slow(step: int, timestep: int, latents: torch.Tensor):
+        """Callback for slow model (cosxl) - uses different signature without callback_kwargs"""
+        progress_data = {"step": step + 1, "total_steps": 20}
+
+        with image_queue_lock:
+            image_results[task_id]["progress"] = progress_data
+
+        # Emit progress update via socket
+        if session_id:
+            asyncio.run(sio.emit('image_progress', {
+                'task_id': task_id,
+                'progress': progress_data
+            }, room=session_id))
+
+        # Generate preview every 2 steps
+        if step % 2 == 0:
+            try:
+                with torch.no_grad():
+                    latents_scaled = (1 / 0.18215) * latents
+                    image_tensor = sd_cosxl_img2img.vae.decode(latents_scaled).sample
+                    image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+                    image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+                    pil_images = sd_cosxl_img2img.numpy_to_pil(image_array)
+                    preview_image = pil_images[0]
+
+                    buffered = io.BytesIO()
+                    preview_image.save(buffered, format="PNG")
+                    preview_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+                    with image_queue_lock:
+                        image_results[task_id]["preview"] = preview_base64
+
+                    # Emit preview via socket
+                    if session_id:
+                        asyncio.run(sio.emit('image_preview', {
+                            'task_id': task_id,
+                            'preview': preview_base64
+                        }, room=session_id))
+            except Exception as e:
+                print(f"Preview generation error: {e}")
 
     if model == "fast":
         image = image.resize((512, 512), Image.Resampling.LANCZOS)
@@ -528,7 +599,7 @@ def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: st
             prompt=prompt,
             image=image,
             num_inference_steps=20,
-            callback=progress_callback,
+            callback=progress_callback_slow,
             callback_steps=1
         ).images[0]
 
