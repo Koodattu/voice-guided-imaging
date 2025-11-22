@@ -16,6 +16,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
+import socketio
 import torch
 from transformers import T5EncoderModel, BitsAndBytesConfig as TransformersBitsAndBytesConfig
 from diffusers import (
@@ -41,7 +42,9 @@ from pydub import AudioSegment
 # Load environment
 load_dotenv()
 CACHE_DIR = "./cache"
+TEMP_AUDIO_DIR = "./temp_audio"
 os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/v1")
@@ -52,14 +55,19 @@ login(HUGGINGFACE_TOKEN)
 
 app = FastAPI()
 
+# Socket.IO for progress updates
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+socket_app = socketio.ASGIApp(sio, app)
+
 # Models
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Backend using device: {device}")
 
 # Queue system for image generation
 image_queue = Queue()
-image_results: Dict[str, Any] = {}
+image_results: Dict[str, Any] = {}  # task_id -> task info
 image_queue_lock = Lock()
+task_to_session: Dict[str, str] = {}  # task_id -> session_id for socket emissions
 
 # Locks for different operations
 whisper_lock = Lock()
@@ -221,39 +229,58 @@ async def health_check():
 @app.post("/transcribe")
 async def transcribe_audio(request: TranscribeRequest):
     """Transcribe audio using local Whisper"""
+    temp_webm = None
+    temp_wav = None
+
     try:
         # Decode base64 audio
         audio_data = base64.b64decode(request.audio_base64)
 
-        # Save temporarily
-        temp_path = f"temp_audio_{uuid.uuid4()}.webm"
-        with open(temp_path, "wb") as f:
+        # Save temporarily in temp_audio directory
+        temp_webm = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.webm")
+        temp_wav = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.wav")
+
+        with open(temp_webm, "wb") as f:
             f.write(audio_data)
 
+        # Convert webm to wav for Whisper
+        audio = AudioSegment.from_file(temp_webm, format="webm")
+
         # Check audio length
-        audio = AudioSegment.from_file(temp_path)
         if len(audio) < 500:  # Reduced from 2000ms to 500ms for partial transcriptions
-            os.remove(temp_path)
             return {"transcription": "", "error": "Audio too short"}
+
+        # Export to wav
+        audio.export(temp_wav, format="wav")
 
         # Transcribe with lock
         with whisper_lock:
             segments, _ = whisper_model.transcribe(
-                temp_path,
+                temp_wav,
                 language=request.language,
                 task="transcribe",
                 batch_size=16
             )
             result_text = ' '.join([segment.text for segment in segments])
 
-        # Cleanup
-        os.remove(temp_path)
-
         return {"transcription": result_text}
 
     except Exception as e:
         print(f"Transcription error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        # Cleanup temp files
+        if temp_webm and os.path.exists(temp_webm):
+            try:
+                os.remove(temp_webm)
+            except Exception as e:
+                print(f"Error removing temp webm: {e}")
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except Exception as e:
+                print(f"Error removing temp wav: {e}")
 
 # LLM endpoint
 @app.post("/llm")
@@ -287,28 +314,41 @@ async def process_llm(request: LLMRequest):
 def process_image_queue():
     """Process image generation/editing tasks one at a time"""
     while True:
+        # Update queue positions for all waiting tasks
+        update_queue_positions()
+
         task = image_queue.get()
         task_id = task["task_id"]
         task_type = task["type"]
+        session_id = task.get("session_id")
 
         try:
-            # Update status
+            # Update status to processing
             with image_queue_lock:
                 image_results[task_id]["status"] = "processing"
+                image_results[task_id]["position"] = 0
+
+            # Emit processing started event
+            if session_id:
+                asyncio.run(sio.emit('image_processing_started', {
+                    'task_id': task_id
+                }, room=session_id))
 
             if task_type == "generate":
                 result = generate_image_internal(
                     task["prompt"],
                     task["num_steps"],
                     task["guidance_scale"],
-                    task_id
+                    task_id,
+                    session_id
                 )
             elif task_type == "edit":
                 result = edit_image_internal(
                     task["prompt"],
                     task["image"],
                     task["model"],
-                    task_id
+                    task_id,
+                    session_id
                 )
 
             # Store result
@@ -316,46 +356,103 @@ def process_image_queue():
                 image_results[task_id]["status"] = "completed"
                 image_results[task_id]["result"] = result
 
+            # Emit completion event
+            if session_id:
+                asyncio.run(sio.emit('image_processing_completed', {
+                    'task_id': task_id,
+                    'result': result
+                }, room=session_id))
+
         except Exception as e:
             print(f"Error processing task {task_id}: {e}")
             with image_queue_lock:
                 image_results[task_id]["status"] = "error"
                 image_results[task_id]["error"] = str(e)
 
+            # Emit error event
+            if session_id:
+                asyncio.run(sio.emit('image_processing_error', {
+                    'task_id': task_id,
+                    'error': str(e)
+                }, room=session_id))
+
         finally:
             image_queue.task_done()
 
-def generate_image_internal(prompt: str, num_steps: int, guidance_scale: float, task_id: str):
+def update_queue_positions():
+    """Update queue positions for all waiting tasks and emit updates"""
+    with image_queue_lock:
+        # Get all queued tasks
+        queued_tasks = [(tid, info) for tid, info in image_results.items()
+                       if info["status"] == "queued"]
+
+        # Sort by creation order (assuming task_ids are ordered)
+        queued_tasks.sort(key=lambda x: x[0])
+
+        # Update positions
+        for position, (task_id, info) in enumerate(queued_tasks):
+            old_position = info.get("position", -1)
+            new_position = position
+
+            if old_position != new_position:
+                info["position"] = new_position
+                session_id = task_to_session.get(task_id)
+
+                if session_id:
+                    asyncio.run(sio.emit('queue_position_update', {
+                        'task_id': task_id,
+                        'position': new_position
+                    }, room=session_id))
+
+def generate_image_internal(prompt: str, num_steps: int, guidance_scale: float, task_id: str, session_id: Optional[str] = None):
     """Internal image generation with progress updates"""
-    def progress_callback(step: int, timestep: int, latents: torch.Tensor):
+    def progress_callback(pipe, step: int, timestep: int, callback_kwargs: dict):
         # Update progress
+        progress_data = {
+            "step": step + 1,
+            "total_steps": num_steps
+        }
+
         with image_queue_lock:
-            image_results[task_id]["progress"] = {
-                "step": step + 1,
-                "total_steps": num_steps
-            }
+            image_results[task_id]["progress"] = progress_data
+
+        # Emit progress update via socket
+        if session_id:
+            asyncio.run(sio.emit('image_progress', {
+                'task_id': task_id,
+                'progress': progress_data
+            }, room=session_id))
 
         # Generate preview every few steps
         if step % 2 == 0:
-            with torch.no_grad():
-                latents_scaled = (1 / 0.18215) * latents
-                weights = ((60, -60, 25, -70), (60, -5, 15, -50), (60, 10, -5, -35))
-                weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
-                biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
-                rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents_scaled, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
-                image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
-                image_array = image_array.transpose(1, 2, 0)
-                preview_image = Image.fromarray(image_array)
+            latents = callback_kwargs.get("latents")
+            if latents is not None:
+                with torch.no_grad():
+                    latents_scaled = (1 / 0.18215) * latents
+                    weights = ((60, -60, 25, -70), (60, -5, 15, -50), (60, 10, -5, -35))
+                    weights_tensor = torch.t(torch.tensor(weights, dtype=latents.dtype).to(latents.device))
+                    biases_tensor = torch.tensor((150, 140, 130), dtype=latents.dtype).to(latents.device)
+                    rgb_tensor = torch.einsum("...lxy,lr -> ...rxy", latents_scaled, weights_tensor) + biases_tensor.unsqueeze(-1).unsqueeze(-1)
+                    image_array = rgb_tensor.clamp(0, 255)[0].byte().cpu().numpy()
+                    image_array = image_array.transpose(1, 2, 0)
+                    preview_image = Image.fromarray(image_array)
 
-                # Store preview
-                buffered = io.BytesIO()
-                preview_image.save(buffered, format="PNG")
-                preview_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                    # Store preview
+                    buffered = io.BytesIO()
+                    preview_image.save(buffered, format="PNG")
+                    preview_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-                with image_queue_lock:
-                    image_results[task_id]["preview"] = preview_base64
+                    with image_queue_lock:
+                        image_results[task_id]["preview"] = preview_base64
 
-        return {}
+                    # Emit preview via socket
+                    if session_id:
+                        asyncio.run(sio.emit('image_preview', {
+                            'task_id': task_id,
+                            'preview': preview_base64
+                        }, room=session_id))
+
+        return callback_kwargs
 
     image = sdxl_l_txt2img(
         prompt,
@@ -371,32 +468,51 @@ def generate_image_internal(prompt: str, num_steps: int, guidance_scale: float, 
 
     return {"image_base64": image_base64}
 
-def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: str):
+def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: str, session_id: Optional[str] = None):
     """Internal image editing with progress updates"""
-    def progress_callback(step: int, timestep: int, latents: torch.Tensor):
+    def progress_callback(pipe, step: int, timestep: int, callback_kwargs: dict):
+        progress_data = None
+        if model == "fast":
+            progress_data = {"step": step + 1, "total_steps": 40}
+        else:
+            progress_data = {"step": step + 1, "total_steps": 20}
+
         with image_queue_lock:
-            if model == "fast":
-                image_results[task_id]["progress"] = {"step": step + 1, "total_steps": 40}
-            else:
-                image_results[task_id]["progress"] = {"step": step + 1, "total_steps": 20}
+            image_results[task_id]["progress"] = progress_data
+
+        # Emit progress update via socket
+        if session_id:
+            asyncio.run(sio.emit('image_progress', {
+                'task_id': task_id,
+                'progress': progress_data
+            }, room=session_id))
 
         # Generate preview for slow model
         if model == "slow" and step % 5 == 0:
-            with torch.no_grad():
-                latents_scaled = (1 / 0.18215) * latents
-                image_tensor = sd_cosxl_img2img.vae.decode(latents_scaled).sample
-                image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-                image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-                pil_images = sd_cosxl_img2img.numpy_to_pil(image_array)
+            latents = callback_kwargs.get("latents")
+            if latents is not None:
+                with torch.no_grad():
+                    latents_scaled = (1 / 0.18215) * latents
+                    image_tensor = sd_cosxl_img2img.vae.decode(latents_scaled).sample
+                    image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+                    image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
+                    pil_images = sd_cosxl_img2img.numpy_to_pil(image_array)
 
-                buffered = io.BytesIO()
-                pil_images[0].save(buffered, format="PNG")
-                preview_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                    buffered = io.BytesIO()
+                    pil_images[0].save(buffered, format="PNG")
+                    preview_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-                with image_queue_lock:
-                    image_results[task_id]["preview"] = preview_base64
+                    with image_queue_lock:
+                        image_results[task_id]["preview"] = preview_base64
 
-        return {}
+                    # Emit preview via socket
+                    if session_id:
+                        asyncio.run(sio.emit('image_preview', {
+                            'task_id': task_id,
+                            'preview': preview_base64
+                        }, room=session_id))
+
+        return callback_kwargs
 
     if model == "fast":
         image = image.resize((512, 512), Image.Resampling.LANCZOS)
@@ -428,6 +544,7 @@ def edit_image_internal(prompt: str, image: Image.Image, model: str, task_id: st
 async def generate_image(request: ImageGenerateRequest):
     """Queue image generation task"""
     task_id = str(uuid.uuid4())
+    session_id = request.session_id
 
     # Add to queue
     with image_queue_lock:
@@ -440,14 +557,22 @@ async def generate_image(request: ImageGenerateRequest):
             "result": None,
             "error": None
         }
+        task_to_session[task_id] = session_id
 
     image_queue.put({
         "task_id": task_id,
         "type": "generate",
         "prompt": request.prompt,
         "num_steps": 4,
-        "guidance_scale": 0
+        "guidance_scale": 0,
+        "session_id": session_id
     })
+
+    # Emit initial queue position
+    await sio.emit('queue_position_update', {
+        'task_id': task_id,
+        'position': position
+    }, room=session_id)
 
     return {"task_id": task_id, "position": position}
 
@@ -456,6 +581,7 @@ async def generate_image(request: ImageGenerateRequest):
 async def edit_image(request: ImageEditRequest):
     """Queue image editing task"""
     task_id = str(uuid.uuid4())
+    session_id = request.session_id
 
     # Decode image
     image_data = base64.b64decode(request.image_base64)
@@ -472,14 +598,22 @@ async def edit_image(request: ImageEditRequest):
             "result": None,
             "error": None
         }
+        task_to_session[task_id] = session_id
 
     image_queue.put({
         "task_id": task_id,
         "type": "edit",
         "prompt": request.prompt,
         "image": image,
-        "model": request.model
+        "model": request.model,
+        "session_id": session_id
     })
+
+    # Emit initial queue position
+    await sio.emit('queue_position_update', {
+        'task_id': task_id,
+        'position': position
+    }, room=session_id)
 
     return {"task_id": task_id, "position": position}
 
@@ -502,6 +636,26 @@ async def get_task_status(task_id: str):
             "error": task_info.get("error")
         }
 
+# Socket.IO events
+@sio.event
+async def connect(sid, environ):
+    """Handle client connection to backend"""
+    print(f'Backend client connected: {sid}')
+
+@sio.event
+async def disconnect(sid):
+    """Handle client disconnection"""
+    print(f'Backend client disconnected: {sid}')
+
+@sio.event
+async def join_session(sid, data):
+    """Join a session room for receiving updates"""
+    session_id = data.get('session_id')
+    if session_id:
+        await sio.enter_room(sid, session_id)
+        print(f'Client {sid} joined session room: {session_id}')
+        await sio.emit('session_joined', {'session_id': session_id}, room=sid)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(socket_app, host="0.0.0.0", port=8000)

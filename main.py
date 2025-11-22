@@ -27,9 +27,14 @@ from google.genai import types
 import requests
 from pydub import AudioSegment
 from pydantic import BaseModel
+import socketio as socketio_client
 
 # Load environment
 load_dotenv()
+
+# Create temp directory for audio files
+TEMP_AUDIO_DIR = "./temp_audio"
+os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 
 # Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -50,6 +55,11 @@ app = Flask(__name__, template_folder=".")
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-this')
 CORS(app)
 socketio = SocketIO(app, async_mode="threading", path="/kuvagen/socket.io", cors_allowed_origins="*")
+
+# Backend Socket.IO client for receiving progress updates
+backend_sio = None
+backend_connected = False
+backend_connection_lock = Lock()
 
 # Session storage (in production, use Redis or database)
 user_sessions: Dict[str, Dict[str, Any]] = {}
@@ -146,11 +156,124 @@ def check_backend_availability():
         with backend_status_lock:
             backend_available = status
         print(f"Backend availability: {backend_available}")
+
+        # Connect to backend socket if available
+        if status:
+            connect_to_backend_socket()
     except Exception as e:
         with backend_status_lock:
             backend_available = False
         print(f"Backend not available: {e}")
     return backend_available
+
+def connect_to_backend_socket():
+    """Connect to backend's Socket.IO server"""
+    global backend_sio, backend_connected
+
+    with backend_connection_lock:
+        if backend_connected:
+            return
+
+        try:
+            backend_sio = socketio_client.Client()
+
+            @backend_sio.event
+            def connect():
+                global backend_connected
+                backend_connected = True
+                print('Connected to backend Socket.IO server')
+
+            @backend_sio.event
+            def disconnect():
+                global backend_connected
+                backend_connected = False
+                print('Disconnected from backend Socket.IO server')
+
+            @backend_sio.on('queue_position_update')
+            def on_queue_position_update(data):
+                """Relay queue position updates to frontend"""
+                task_id = data.get('task_id')
+                position = data.get('position')
+
+                # Find session for this task
+                session_id = find_session_for_task(task_id)
+                if session_id:
+                    socketio.emit('backend_queue_position', {
+                        'task_id': task_id,
+                        'position': position
+                    }, room=session_id)
+
+            @backend_sio.on('image_processing_started')
+            def on_processing_started(data):
+                """Relay processing started event to frontend"""
+                task_id = data.get('task_id')
+                session_id = find_session_for_task(task_id)
+                if session_id:
+                    socketio.emit('backend_processing_started', {
+                        'task_id': task_id
+                    }, room=session_id)
+
+            @backend_sio.on('image_progress')
+            def on_image_progress(data):
+                """Relay progress updates to frontend"""
+                task_id = data.get('task_id')
+                progress = data.get('progress')
+                session_id = find_session_for_task(task_id)
+                if session_id:
+                    socketio.emit('backend_progress', {
+                        'task_id': task_id,
+                        'progress': progress
+                    }, room=session_id)
+
+            @backend_sio.on('image_preview')
+            def on_image_preview(data):
+                """Relay preview images to frontend"""
+                task_id = data.get('task_id')
+                preview = data.get('preview')
+                session_id = find_session_for_task(task_id)
+                if session_id:
+                    socketio.emit('backend_preview', {
+                        'task_id': task_id,
+                        'preview': preview
+                    }, room=session_id)
+
+            @backend_sio.on('image_processing_completed')
+            def on_processing_completed(data):
+                """Relay completion event to frontend"""
+                task_id = data.get('task_id')
+                result = data.get('result')
+                session_id = find_session_for_task(task_id)
+                if session_id:
+                    socketio.emit('backend_completed', {
+                        'task_id': task_id,
+                        'result': result
+                    }, room=session_id)
+
+            @backend_sio.on('image_processing_error')
+            def on_processing_error(data):
+                """Relay error event to frontend"""
+                task_id = data.get('task_id')
+                error = data.get('error')
+                session_id = find_session_for_task(task_id)
+                if session_id:
+                    socketio.emit('backend_error', {
+                        'task_id': task_id,
+                        'error': error
+                    }, room=session_id)
+
+            # Connect to backend
+            backend_sio.connect(BACKEND_URL)
+
+        except Exception as e:
+            print(f"Error connecting to backend socket: {e}")
+            backend_connected = False
+
+def find_session_for_task(task_id: str) -> Optional[str]:
+    """Find which user session owns a task"""
+    for session_id, session_data in user_sessions.items():
+        if session_data.get('current_task_id') == task_id:
+            return session_id
+    return None
 
 def poll_backend_health():
     """Background task to poll backend health every 5 minutes"""
@@ -201,6 +324,37 @@ def handle_connect():
     """Handle client connection"""
     print(f'Client connected')
     emit("status", "Connected to server! Ready to go!")
+
+@socketio.on('backend_image_ready')
+def handle_backend_image_ready(data):
+    """Handle image completion from backend via socket events"""
+    user_id = get_user_id()
+    user_data = get_or_create_session(user_id)
+
+    result = data.get('result')
+    if result and 'image_base64' in result:
+        # Decode and save image
+        image_data = base64.b64decode(result['image_base64'])
+        image = Image.open(io.BytesIO(image_data))
+
+        # Get prompt and parent from session
+        prompt = user_data.get('pending_prompt', 'Generated image')
+        parent = user_data.get('pending_parent')
+
+        # Save image
+        image_name = save_image(user_id, image, prompt, parent)
+        increment_user_count(user_id)
+
+        # Clear pending data
+        user_data.pop('current_task_id', None)
+        user_data.pop('pending_prompt', None)
+        user_data.pop('pending_parent', None)
+
+        # Emit final result to client
+        emit('image_ready', {
+            'image': image_name,
+            'prompt': prompt
+        })
 
 @socketio.on('user_id')
 def handle_user_id(data):
@@ -260,23 +414,28 @@ def handle_full_audio_data(data):
             # Use cloud transcription
             audio_bytes = base64.b64decode(data)
 
-            # Save temporarily
-            temp_path = "temp_audio.webm"
-            with open(temp_path, "wb") as f:
-                f.write(audio_bytes)
+            # Save temporarily in temp_audio directory
+            temp_path = os.path.join(TEMP_AUDIO_DIR, f"temp_audio_{uuid.uuid4()}.webm")
+            try:
+                with open(temp_path, "wb") as f:
+                    f.write(audio_bytes)
 
-            # Transcribe with OpenAI
-            with open(temp_path, "rb") as audio_file:
-                response = OPENAI_CLIENT.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language=language,
-                    response_format="text"
-                )
-            transcription = response
-
-            # Cleanup
-            os.remove(temp_path)
+                # Transcribe with OpenAI
+                with open(temp_path, "rb") as audio_file:
+                    response = OPENAI_CLIENT.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language=language,
+                        response_format="text"
+                    )
+                transcription = response
+            finally:
+                # Cleanup
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception as e:
+                        print(f"Error removing temp audio: {e}")
         else:
             emit("error", "No transcription service available")
             return
@@ -401,15 +560,24 @@ def handle_process_command(data):
         print(f"LLM response: {action}, {prompt}")
         emit("llm_response", f"{action}: {prompt}")
 
+        # Store prompt for later use
+        user_data['pending_prompt'] = prompt
+
         # Execute action
         if action == "create":
             emit("status", "Creating new image...")
+            user_data['pending_parent'] = None
             result = generate_image_socketio(user_id, prompt)
-            emit("command_result", result)
+            if result:  # Cloud model returns immediately
+                emit("command_result", result)
+            # else: local model will emit via socket events
         elif action == "edit":
             emit("status", "Editing image...")
+            user_data['pending_parent'] = image
             result = edit_image_socketio(user_id, image, prompt)
-            emit("command_result", result)
+            if result:  # Cloud model returns immediately
+                emit("command_result", result)
+            # else: local model will emit via socket events
         elif action == "undo":
             emit("status", "Reverting to previous image...")
             result = previous_image_socketio(user_id, image)
@@ -462,8 +630,22 @@ def generate_image_socketio(user_id: str, prompt: str):
         result = response.json()
         task_id = result["task_id"]
 
-        # Poll for completion
-        return poll_task_completion_socketio(user_id, task_id, prompt, None)
+        # Track task for this session
+        user_data['current_task_id'] = task_id
+
+        # Join backend session room for receiving updates
+        if backend_sio and backend_connected:
+            backend_sio.emit('join_session', {'session_id': user_id})
+
+        # Emit initial status to frontend
+        socketio.emit('task_queued', {
+            'task_id': task_id,
+            'position': result.get('position', 0)
+        }, room=user_id)
+
+        # The actual result will come via socket events
+        # We'll handle completion in the socket event handlers
+        return None
 
     else:
         # Use cloud service
@@ -531,8 +713,23 @@ def edit_image_socketio(user_id: str, parent_image: str, prompt: str):
         result = response.json()
         task_id = result["task_id"]
 
-        # Poll for completion
-        return poll_task_completion_socketio(user_id, task_id, prompt, parent_image)
+        # Track task for this session
+        user_data['current_task_id'] = task_id
+        user_data['pending_prompt'] = prompt
+        user_data['pending_parent'] = parent_image
+
+        # Join backend session room for receiving updates
+        if backend_sio and backend_connected:
+            backend_sio.emit('join_session', {'session_id': user_id})
+
+        # Emit initial status to frontend
+        socketio.emit('task_queued', {
+            'task_id': task_id,
+            'position': result.get('position', 0)
+        }, room=user_id)
+
+        # The actual result will come via socket events
+        return None
 
     else:
         # Use cloud service
@@ -609,13 +806,20 @@ def poll_task_completion_socketio(user_id: str, task_id: str, prompt: str, paren
             status = status_data.get("status")
 
             if status == "processing":
-                progress = status_data.get("progress", 0)
-                emit("generation_progress", {"progress": progress})
+                # Calculate progress percentage from step info
+                progress_info = status_data.get("progress")
+                if progress_info:
+                    step = progress_info.get("step", 0)
+                    total_steps = progress_info.get("total_steps", 1)
+                    progress_percentage = int((step / total_steps) * 100)
+                    emit("generation_progress", {"progress": progress_percentage})
 
                 # Send preview if available
                 preview = status_data.get("preview")
                 if preview:
                     emit("generation_preview", {"preview": preview})
+                    # Also emit as image_progress for compatibility
+                    emit("image_progress", preview)
 
             elif status == "completed":
                 result = status_data.get("result", {})

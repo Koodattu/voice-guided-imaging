@@ -8,6 +8,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- frontend backend communication -->
     <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    <!-- ort is required by vad -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+    <!-- vad for audio recording -->
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad/dist/index.browser.js"></script>
     <!-- font awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" />
     <!-- speech bubble font -->
@@ -654,6 +658,7 @@
       let audioContext = null;
       let analyser = null;
       let audioLevelCheckInterval = null;
+      let myvad = null; // VAD instance for partial transcriptions
 
       // Get or create user ID from localStorage
       function getUserId() {
@@ -826,6 +831,71 @@
           updateMicStatus();
           spinner_cont.style.display = "none";
         });
+
+        // Backend progress events
+        socket.on("task_queued", (data) => {
+          console.log("Task queued:", data);
+          system_status.textContent = `Queued (position: ${data.position})...`;
+          spinner_cont.style.display = "flex";
+        });
+
+        socket.on("backend_queue_position", (data) => {
+          console.log("Queue position update:", data);
+          system_status.textContent = `In queue (position: ${data.position})...`;
+        });
+
+        socket.on("backend_processing_started", (data) => {
+          console.log("Processing started:", data);
+          system_status.textContent = "Processing image...";
+        });
+
+        socket.on("backend_progress", (data) => {
+          console.log("Progress update:", data);
+          const progress = data.progress;
+          if (progress) {
+            const percentage = Math.round((progress.step / progress.total_steps) * 100);
+            system_status.textContent = `Generating... ${progress.step}/${progress.total_steps} (${percentage}%)`;
+          }
+        });
+
+        socket.on("backend_preview", (data) => {
+          console.log("Preview received");
+          if (data.preview) {
+            generated_image.src = `data:image/png;base64,${data.preview}`;
+          }
+        });
+
+        socket.on("backend_completed", async (data) => {
+          console.log("Backend completed:", data);
+          // Process the completed image via backend_image_ready
+          socket.emit("backend_image_ready", data);
+        });
+
+        socket.on("backend_error", (data) => {
+          console.error("Backend error:", data);
+          system_status.textContent = "Error: " + data.error;
+          processJussiRasku("error:");
+          backendProcessing = false;
+          shouldClearTranscription = true;
+          updateMicStatus();
+          spinner_cont.style.display = "none";
+        });
+
+        socket.on("image_ready", async (data) => {
+          console.log("Image ready:", data);
+          if (data.image) {
+            generated_image.src = `/kuvagen/images/${data.image}`;
+            generated_image.alt = data.image;
+            system_status.textContent = "Done! Ready for next command.";
+            await loadSessionInfo();
+            processJussiRasku("done:");
+          }
+          backendProcessing = false;
+          shouldClearTranscription = true;
+          updateMicStatus();
+          spinner_cont.style.display = "none";
+          updateGallery();
+        });
       }
 
       async function initializeMicrophone() {
@@ -838,6 +908,45 @@
             },
           });
 
+          // Initialize VAD for partial transcriptions during push-to-talk
+          console.log("Initializing VAD for partial transcriptions");
+          myvad = await vad.MicVAD.new({
+            stream: stream,
+            positiveSpeechThreshold: 0.8,
+            negativeSpeechThreshold: 0.6,
+            minSpeechFrames: 1,
+            preSpeechPadFrames: 5,
+            redemptionFrames: 3,
+            onSpeechStart: () => {
+              console.log("VAD: Speech start detected");
+              if (!isRecording || backendProcessing) {
+                return;
+              }
+              hasAudioData = true;
+              mic_status_box.style.boxShadow = "0 0 5px 5px lightgreen";
+              updateMicStatus();
+            },
+            onSpeechEnd: (audio) => {
+              console.log("VAD: Speech end detected");
+              if (!isRecording || backendProcessing) {
+                return;
+              }
+              mic_status_box.style.boxShadow = "";
+              updateMicStatus();
+
+              // Send partial audio for transcription
+              if (!socket || !socket.connected) {
+                return;
+              }
+              const wavBuffer = vad.utils.encodeWAV(audio);
+              const base64 = vad.utils.arrayBufferToBase64(wavBuffer);
+              socket.emit("audio_data", base64);
+            },
+          });
+
+          // Start VAD in paused state (will be activated during push-to-talk)
+          myvad.pause();
+
           // Set up AudioContext for real-time audio level detection
           audioContext = new (window.AudioContext || window.webkitAudioContext)();
           analyser = audioContext.createAnalyser();
@@ -849,16 +958,6 @@
 
           mediaRecorder.ondataavailable = (e) => {
             audioChunks.push(e.data);
-
-            // Send partial transcription during recording
-            if (isRecording && e.data.size > 0) {
-              const reader = new FileReader();
-              reader.readAsDataURL(e.data);
-              reader.onloadend = () => {
-                const base64 = reader.result.split(",")[1];
-                socket.emit("partial_audio_data", base64);
-              };
-            }
           };
 
           mediaRecorder.onstop = () => {
@@ -887,6 +986,8 @@
               stopRecording();
             }
           };
+
+          console.log("Microphone initialized with VAD support");
         } catch (error) {
           console.error("Microphone error:", error);
           system_status.textContent = "Microphone access denied";
@@ -907,8 +1008,13 @@
         }
 
         audioChunks = [];
-        // Start with timeslice of 1000ms for partial transcriptions
-        mediaRecorder.start(1000);
+        // Start VAD for partial transcriptions
+        if (myvad) {
+          myvad.start();
+          console.log("VAD started for partial transcriptions");
+        }
+        // Start MediaRecorder for full audio
+        mediaRecorder.start();
         system_status.textContent = "Recording...";
         mic_help.textContent = "Release spacebar";
 
@@ -927,7 +1033,17 @@
         // Stop audio level monitoring
         stopAudioLevelMonitoring();
 
-        mediaRecorder.stop();
+        // Pause VAD
+        if (myvad) {
+          myvad.pause();
+          console.log("VAD paused");
+        }
+
+        // Stop MediaRecorder after a short delay to capture final audio
+        setTimeout(() => {
+          mediaRecorder.stop();
+        }, 500);
+
         system_status.textContent = "Processing audio...";
         mic_help.textContent = "Hold spacebar";
 
