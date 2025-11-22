@@ -632,7 +632,7 @@ async def generate_image(request: ImageGenerateRequest):
 
     # Add to queue
     with image_queue_lock:
-        position = image_queue.qsize()
+        position = image_queue.qsize() + 1
         image_results[task_id] = {
             "status": "queued",
             "position": position,
@@ -673,7 +673,7 @@ async def edit_image(request: ImageEditRequest):
 
     # Add to queue
     with image_queue_lock:
-        position = image_queue.qsize()
+        position = image_queue.qsize() + 1
         image_results[task_id] = {
             "status": "queued",
             "position": position,
