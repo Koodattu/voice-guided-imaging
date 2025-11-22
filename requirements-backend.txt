@@ -1,20 +1,20 @@
 # Backend server requirements (heavy inference)
-fastapi==0.109.0
-uvicorn==0.27.0
-python-socketio==5.11.0
-pillow==10.1.0
-python-dotenv==1.0.0
-openai==1.12.0
+fastapi
+uvicorn
+python-socketio
+pillow
+python-dotenv
+openai
 torch --index-url https://download.pytorch.org/whl/cu126
 torchvision --index-url https://download.pytorch.org/whl/cu126
 torchaudio --index-url https://download.pytorch.org/whl/cu126
-diffusers==0.27.0
-transformers==4.38.0
-accelerate==0.27.0
-faster-whisper==1.0.0
-bitsandbytes==0.42.0
-safetensors==0.4.2
-huggingface_hub[cli]==0.20.0
-gguf==0.6.0
+diffusers
+transformers
+accelerate
+faster-whisper
+bitsandbytes
+safetensors
+huggingface_hub[cli]
+gguf
 websocket-client
 pydub
