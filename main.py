@@ -29,7 +29,8 @@ from diffusers import (
     StableDiffusionLatentUpscalePipeline,
     AutoPipelineForText2Image,
     FluxKontextPipeline,
-    GGUFQuantizationConfig
+    GGUFQuantizationConfig,
+    ZImagePipeline
 )
 from diffusers.utils import export_to_video
 from huggingface_hub import hf_hub_download, login
@@ -109,167 +110,22 @@ def load_whisper_model():
     print("WHISPER model loaded successfully!")
     return BatchedInferencePipeline(model=model)
 
-# https://huggingface.co/ByteDance/SDXL-Lightning
-def load_sdxl_lightning():
-    print("Loading SDXL-Lightning model...")
-    base = "stabilityai/stable-diffusion-xl-base-1.0"
-    repo = "ByteDance/SDXL-Lightning"
-    ckpt = "sdxl_lightning_4step_unet.safetensors"
-    unet_config = UNet2DConditionModel.load_config(base, subfolder="unet")
-    unet = UNet2DConditionModel.from_config(unet_config).to("cuda", torch.float16)
-    model_path = hf_hub_download(repo, ckpt, cache_dir=CACHE_DIR)
-    unet.load_state_dict(load_file(model_path, device="cuda"))
-    txt2img = StableDiffusionXLPipeline.from_pretrained(
-        base,
-        unet=unet,
-        torch_dtype=torch.float16,
-        variant="fp16",
+# https://huggingface.co/Tongyi-MAI/Z-Image-Turbo
+def load_zimage_turbo():
+    print("Loading Z-Image-Turbo model...")
+    pipe = ZImagePipeline.from_pretrained(
+        "Tongyi-MAI/Z-Image-Turbo",
+        torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=False,
         cache_dir=CACHE_DIR
     )
-    txt2img.to("cuda")
-    txt2img.scheduler = EulerDiscreteScheduler.from_config(
-        txt2img.scheduler.config,
-        timestep_spacing="trailing"
-    )
-    txt2img.enable_model_cpu_offload()
-    print("SDXL-Lightning model loaded successfully!")
-    return txt2img
-
-# https://huggingface.co/city96/FLUX.1-dev-gguf
-def load_flux1_dev_gguf():
-    print("Loading FLUX.1-dev GGUF model...")
-    from diffusers import GGUFQuantizationConfig
-    ckpt_path = (
-        "https://huggingface.co/city96/FLUX.1-dev-gguf/blob/main/flux1-dev-Q2_K.gguf"
-    )
-    transformer = FluxTransformer2DModel.from_single_file(
-        ckpt_path,
-        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-        torch_dtype=torch.bfloat16,
-    )
-    pipe = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-dev",
-        transformer=transformer,
-        torch_dtype=torch.bfloat16,
-    )
+    pipe.to("cuda")
+    #pipe.transformer.compile()
+    #pipe.transformer.set_attention_backend("flash")
+    #pipe.transformer.set_attention_backend("_flash_3")
     pipe.enable_model_cpu_offload()
-    print("FLUX.1-dev GGUF model loaded successfully!")
+    print("Z-Image-Turbo model loaded successfully!")
     return pipe
-
-# https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF
-def load_flux1_kontext_dev_gguf():
-    print("Loading FLUX.1-Kontext-dev GGUF model...")
-    ckpt_path = (
-        "https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF/blob/main/flux1-kontext-dev-Q4_K_M.gguf"
-    )
-    transformer = FluxTransformer2DModel.from_single_file(
-        ckpt_path,
-        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-        torch_dtype=torch.bfloat16,
-    )
-    pipe = FluxKontextPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        transformer=transformer,
-        torch_dtype=torch.bfloat16,
-    )
-    pipe.enable_model_cpu_offload()
-    print("FLUX.1-Kontext-dev GGUF model loaded successfully!")
-    return pipe
-
-# https://huggingface.co/black-forest-labs/FLUX.1-schnell
-def load_flux1_schnell():
-    print("Loading FLUX.1-Schnell model...")
-    quant_config = TransformersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    text_encoder_2_4bit = T5EncoderModel.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
-        subfolder="text_encoder_2",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
-    )
-    quant_config = DiffusersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    transformer_4bit = FluxTransformer2DModel.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
-        subfolder="transformer",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1 = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
-        text_encoder_2=text_encoder_2_4bit,
-        transformer=transformer_4bit,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1.enable_model_cpu_offload()
-    print("FLUX.1-Schnell model loaded successfully!")
-    return flux1
-
-# https://huggingface.co/black-forest-labs/FLUX.1-schnell
-def load_flux1_kontext_dev():
-    print("Loading FLUX.1-Kontext-dev model...")
-    quant_config = TransformersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    text_encoder_2_4bit = T5EncoderModel.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        subfolder="text_encoder_2",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR
-    )
-    quant_config = DiffusersBitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    transformer_4bit = FluxTransformer2DModel.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        subfolder="transformer",
-        quantization_config=quant_config,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1 = FluxKontextPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-Kontext-dev",
-        text_encoder_2=text_encoder_2_4bit,
-        transformer=transformer_4bit,
-        torch_dtype=torch.float16,
-        cache_dir=CACHE_DIR,
-        low_cpu_mem_usage=True
-    )
-    flux1.enable_model_cpu_offload()
-    print("FLUX.1-Schnell model loaded successfully!")
-    return flux1
-
-# https://huggingface.co/timbrooks/instruct-pix2pix
-def load_instruct_pix2pix():
-    print("Loading Instruct-Pix2Pix model...")
-    pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-        "timbrooks/instruct-pix2pix",
-        torch_dtype=torch.float16,
-        #safety_checker=None,
-        cache_dir=CACHE_DIR
-    )
-    pix2pix.to("cuda")
-    pix2pix.scheduler = EulerAncestralDiscreteScheduler.from_config(pix2pix.scheduler.config)
-    #pix2pix.enable_model_cpu_offload()
-    print("Instruct-Pix2Pix model loaded successfully!")
-    return pix2pix
 
 # https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
 # https://huggingface.co/stabilityai/cosxl
@@ -305,21 +161,6 @@ def load_cosxl_edit():
     print("COSXL-Edit model loaded successfully!")
     return cosxl
 
-# https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt
-def load_video_diffusion():
-    print("Loading Video-Diffusion model...")
-    img2vid = StableVideoDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-video-diffusion-img2vid-xt-1-1",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        cache_dir=CACHE_DIR
-    )
-    img2vid.to("cuda")
-    img2vid.enable_model_cpu_offload()
-    img2vid.unet.enable_forward_chunking()
-    print("Video-Diffusion model loaded successfully!")
-    return img2vid
-
 def load_ollama_llm():
     print("Loading LLM...")
     messages = [
@@ -350,16 +191,10 @@ print("Loading models...")
 
 load_ollama_llm()
 whisper_model = load_whisper_model()
-sdxl_l_txt2img = load_sdxl_lightning()
-pix2pix_img2img = load_instruct_pix2pix()
-#svd_xt_img2vid = load_video_diffusion()
 
 # Better quality but slower local models
-#flux1_txt2img = load_flux1_schnell()
-#flux1_img2img = load_flux1_kontext_dev()
+zimage_turbo = load_zimage_turbo()
 sd_cosxl_img2img = load_cosxl_edit()
-# load flux kontext gguf
-#flux1_kontext_gguf = load_flux1_kontext_dev_gguf()
 
 # Holder for whole recording
 audio_segments = []
@@ -527,9 +362,6 @@ def llm_process_command(image, command):
     if action == "edit":
         socketio.emit("status", "Editing image...")
         return edit_image(image, prompt)
-    if action == "video":
-        socketio.emit("status", "Generating video from image...")
-        return generate_video_from_image(image, prompt)
     if action == "undo":
         socketio.emit("status", "Reverting to previous image...")
         return previous_image(image)
@@ -569,23 +401,6 @@ def progress_callback_on_step_end(pipe, step: int, timestep: int, callback_kwarg
     socketio.emit("image_progress", img_str)
     return callback_kwargs
 
-def video_progress(pipe, step: int, timestep: int, callback_kwargs: dict):
-    socketio.emit("status", f"Generating, Step {step+1}")
-    latents = callback_kwargs.get("latents")
-    first_frame_latents = latents[0, 0:1]
-    with torch.no_grad():
-        latents_scaled = (1 / 0.18215) * first_frame_latents
-        image_tensor = pipe.vae.decode(latents_scaled, num_frames=1).sample
-        image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
-        image_array = image_tensor.cpu().permute(0, 2, 3, 1).float().numpy()
-        pil_images = pipe.numpy_to_pil(image_array)
-        resized_image = pil_images[0].resize((1024, 1024), resample=Image.LANCZOS)
-        buffered = io.BytesIO()
-        resized_image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        socketio.emit("image_progress", img_str)
-    return callback_kwargs
-
 def progress_callback_old(pipe, step: int, timestep: int, callback_kwargs):
     socketio.emit("status", f"Generating, Step {step+1}")
     latents = callback_kwargs["latents"]
@@ -613,23 +428,15 @@ def generate_image(prompt):
     print(f"Generating image for prompt: {prompt}")
 
     if "local" in selected_model:
-        if "fast" in selected_model or "slow" in selected_model:
-            print("Using SDXL Lightning for fast model option")
-            image = sdxl_l_txt2img(
-                prompt,
-                num_inference_steps=4,
-                guidance_scale=0,
-                callback_on_step_end=progress_callback_old
-            ).images[0]
-        elif "superslow" in selected_model:
-            # FLUX model not loaded, using SDXL Lightning instead
-            print("Using SDXL Lightning for superslow model option")
-            image = sdxl_l_txt2img(
-                prompt,
-                num_inference_steps=8,
-                guidance_scale=0,
-                callback_on_step_end=progress_callback_old
-            ).images[0]
+        print("Using SDXL Lightning for fast model option")
+        image = zimage_turbo(
+            prompt,
+            height=1024,
+            width=1024,
+            num_inference_steps=9,
+            guidance_scale=0,
+            #callback_on_step_end=progress_callback_old
+        ).images[0]
     if "cloud" in selected_model:
         if "openai" in CLOUD_PROVIDER:
             response = get_llm_client(selected_model).images.generate(
@@ -665,24 +472,14 @@ def edit_image(parent_image, prompt):
     image = get_saved_image(parent_image)
 
     if "local" in selected_model:
-        if "fast" in selected_model:
-            image = image.resize((512, 512), Image.Resampling.LANCZOS)
-            image = pix2pix_img2img(
-                prompt,
-                image=image,
-                num_inference_steps=40,
-                callback_on_step_end=progress_callback_old
-            ).images[0]
-            image = image.resize((1024, 1024), Image.Resampling.LANCZOS)
-        if "slow" in selected_model:
-            callback = make_optimised_callback(sd_cosxl_img2img, frequency=21)
-            image = sd_cosxl_img2img(
-                prompt=prompt,
-                image=image,
-                num_inference_steps=20,
-                callback=callback,
-                callback_steps=1
-            ).images[0]
+        callback = make_optimised_callback(sd_cosxl_img2img, frequency=21)
+        image = sd_cosxl_img2img(
+            prompt=prompt,
+            image=image,
+            num_inference_steps=20,
+            callback=callback,
+            callback_steps=1
+        ).images[0]
     if "cloud" in selected_model:
         if "openai" in CLOUD_PROVIDER:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -739,47 +536,6 @@ def previous_image(image):
             break
     image_file = image_file.replace(".webp", "")
     return jsonify({"image": image_file, "prompt": prompt, "action": "undo"})
-
-def mp4_to_webp(mp4_path, webp_path, fps):
-    clip = VideoFileClip(mp4_path)
-    forward_clip = clip
-    backward_clip = clip.with_effects([vfx.TimeMirror()])
-    looping_clip = concatenate_videoclips([forward_clip, backward_clip])
-
-    # Save frames as individual WebP images
-    frames = []
-    for frame in looping_clip.iter_frames(fps=fps):
-        img = Image.fromarray(frame)
-        img = img.resize((1024, 1024), Image.Resampling.LANCZOS)
-        frames.append(img)
-
-    # Save frames as a looping WebP animation
-    frames[0].save(
-        webp_path,
-        save_all=True,
-        append_images=frames[1:],
-        duration=int(1000 / fps),
-        loop=0
-    )
-
-def generate_video_from_image(parent_image, prompt):
-    print("Generating video from image...")
-    image = get_saved_image(parent_image)
-    image = image.resize((1024, 576), Image.Resampling.LANCZOS)
-    frames = svd_xt_img2vid( # type: ignore
-        image=image,
-        num_frames=14,
-        decode_chunk_size=2,
-        num_inference_steps=10,
-        callback_on_step_end=video_progress,
-    ).frames[0]
-    print("Video generated!")
-    export_to_video(frames, "generated_video.mp4", fps=7)
-    mp4_to_webp("generated_video.mp4", "generated_video.webp", 7)
-    image = Image.open("generated_video.webp")
-    image = save_image(image, prompt, parent=parent_image)
-    shutil.copyfile("generated_video.webp", "./gallery/" + image + ".webp")
-    return jsonify({"image": image, "prompt": prompt})
 
 def get_saved_image(image_name):
     path = f"./gallery/{image_name}.webp"
