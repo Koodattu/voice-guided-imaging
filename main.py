@@ -12,13 +12,13 @@ from flask_socketio import SocketIO, emit
 from pydub import AudioSegment
 import torch
 from transformers import T5EncoderModel, pipeline, BitsAndBytesConfig as TransformersBitsAndBytesConfig, CLIPTextModelWithProjection, CLIPTokenizer
-from diffusers import ( 
+from diffusers import (
     BitsAndBytesConfig as DiffusersBitsAndBytesConfig,
-    EulerAncestralDiscreteScheduler, 
-    StableDiffusionInstructPix2PixPipeline, 
-    StableVideoDiffusionPipeline, 
-    StableDiffusionXLPipeline, 
-    UNet2DConditionModel, 
+    EulerAncestralDiscreteScheduler,
+    StableDiffusionInstructPix2PixPipeline,
+    StableVideoDiffusionPipeline,
+    StableDiffusionXLPipeline,
+    UNet2DConditionModel,
     EulerDiscreteScheduler,
     StableDiffusionXLInstructPix2PixPipeline,
     AutoencoderKL,
@@ -71,7 +71,7 @@ OLLAMA_CLIENT = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
 GOOGLE_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
 
 # Setup LLM client based on provider choice.
-def get_llm_client(selected_model) -> OpenAI: 
+def get_llm_client(selected_model) -> OpenAI:
     if "cloud" in selected_model.lower():
         print("Using OpenAI API")
         return OPENAI_CLIENT
@@ -132,15 +132,15 @@ def load_sdxl_lightning():
     model_path = hf_hub_download(repo, ckpt, cache_dir=CACHE_DIR)
     unet.load_state_dict(load_file(model_path, device="cuda"))
     txt2img = StableDiffusionXLPipeline.from_pretrained(
-        base, 
-        unet=unet, 
-        torch_dtype=torch.float16, 
+        base,
+        unet=unet,
+        torch_dtype=torch.float16,
         variant="fp16",
         cache_dir=CACHE_DIR
     )
     txt2img.to("cuda")
     txt2img.scheduler = EulerDiscreteScheduler.from_config(
-        txt2img.scheduler.config, 
+        txt2img.scheduler.config,
         timestep_spacing="trailing"
     )
     txt2img.enable_model_cpu_offload()
@@ -179,7 +179,7 @@ def load_flux1_schnell():
         "black-forest-labs/FLUX.1-schnell",
         text_encoder_2=text_encoder_2_4bit,
         transformer=transformer_4bit,
-        torch_dtype=torch.float16, 
+        torch_dtype=torch.float16,
         cache_dir=CACHE_DIR,
         low_cpu_mem_usage=True
     )
@@ -191,8 +191,8 @@ def load_flux1_schnell():
 def load_instruct_pix2pix():
     print("Loading Instruct-Pix2Pix model...")
     pix2pix = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-        "timbrooks/instruct-pix2pix", 
-        torch_dtype=torch.float16, 
+        "timbrooks/instruct-pix2pix",
+        torch_dtype=torch.float16,
         #safety_checker=None,
         cache_dir=CACHE_DIR
     )
@@ -206,7 +206,7 @@ def load_instruct_pix2pix():
 def load_sd_x2_lups():
     print("Loading SD-X2-Latent-Upscaler model...")
     upscaler = StableDiffusionLatentUpscalePipeline.from_pretrained(
-        "stabilityai/sd-x2-latent-upscaler", 
+        "stabilityai/sd-x2-latent-upscaler",
         torch_dtype=torch.float16,
         cache_dir=CACHE_DIR
     )
@@ -220,7 +220,7 @@ def load_sd_x2_lups():
 def load_cosxl_edit():
     print("Loading COSXL-Edit model...")
     vae = AutoencoderKL.from_pretrained(
-        "madebyollin/sdxl-vae-fp16-fix", 
+        "madebyollin/sdxl-vae-fp16-fix",
         torch_dtype=torch.float16,
         cache_dir=CACHE_DIR
     )
@@ -230,19 +230,19 @@ def load_cosxl_edit():
         cache_dir=CACHE_DIR
     )
     cosxl = StableDiffusionXLInstructPix2PixPipeline.from_single_file(
-        model_path, 
-        vae=vae, 
-        torch_dtype=torch.float16, 
-        num_in_channels=8, 
+        model_path,
+        vae=vae,
+        torch_dtype=torch.float16,
+        num_in_channels=8,
         is_cosxl_edit=True,
         cache_dir=CACHE_DIR
     )
     cosxl.to("cuda")
     cosxl.scheduler = EDMEulerScheduler(
-        sigma_min=0.002, 
-        sigma_max=120.0, 
-        sigma_data=1.0, 
-        prediction_type="v_prediction", 
+        sigma_min=0.002,
+        sigma_max=120.0,
+        sigma_data=1.0,
+        prediction_type="v_prediction",
         sigma_schedule="exponential"
     )
     cosxl.enable_model_cpu_offload()
@@ -273,7 +273,7 @@ def load_ollama_llm():
         ],
         "model": get_llm_model("local"),
         "format": LLMOutput.model_json_schema(),
-        "options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20, "keep_alive": -1}
+        #"options": {"num_ctx": 1280, "temperature": 0, "num_predict": 20, "keep_alive": -1}
     }
     ollama_client = OllamaClient(
         host='http://localhost:11434',
@@ -327,7 +327,7 @@ def poll_llm(user_prompt):
             messages=messages,
             max_tokens=200,
             response_format=LLMOutput,
-            extra_body=extra_body,
+            #extra_body=extra_body,
         )
         result = response.choices[0].message.parsed
         return result.action, result.prompt
@@ -492,7 +492,7 @@ def llm_process_command(image, command):
     if action == "error":
         return jsonify({"error": prompt})
 
-def make_optimised_callback(pipe, frequency: int = 11):
+def make_optimised_callback(pipe, frequency: int = 22):
     def callback(step: int, timestep: int, latents: torch.Tensor):
         socketio.emit("status", f"Generating, Step {step+1}")
         if step % frequency == 0:
@@ -596,7 +596,7 @@ def generate_image(prompt):
             image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
         if "google" in CLOUD_PROVIDER:
             response = GOOGLE_CLIENT.models.generate_images(
-                model='imagen-3.0-generate-002',
+                model='imagen-4.0-generate-001',
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
@@ -619,8 +619,8 @@ def edit_image(parent_image, prompt):
         if "fast" in selected_model:
             image = image.resize((512, 512), Image.Resampling.LANCZOS)
             image = pix2pix_img2img(
-                prompt, 
-                image=image, 
+                prompt,
+                image=image,
                 num_inference_steps=40,
                 callback_on_step_end=progress_callback_old
             ).images[0]
@@ -653,7 +653,7 @@ def edit_image(parent_image, prompt):
                 image = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json)))
         if "google" in CLOUD_PROVIDER:
             response = GOOGLE_CLIENT.models.generate_content(
-                model="gemini-2.0-flash-exp-image-generation",
+                model="gemini-2.5-flash-image",
                 contents=["Please edit the image: " + prompt, image],
                 config=types.GenerateContentConfig(
                     response_modalities=['Text', 'Image']
@@ -679,10 +679,10 @@ def previous_image(image):
             prompt = obj["prompt"]
             parent = obj["parent"]
             break
-    
+
     if parent:
         return jsonify({"image": parent, "prompt": prompt, "action": "undo"})
-    
+
     image_file = get_previous_image("./gallery", image + ".webp")
     for obj in gallery_json:
         if obj["name"] == image_file:
@@ -718,9 +718,9 @@ def generate_video_from_image(parent_image, prompt):
     image = get_saved_image(parent_image)
     image = image.resize((1024, 576), Image.Resampling.LANCZOS)
     frames = svd_xt_img2vid(
-        image=image, 
+        image=image,
         num_frames=14,
-        decode_chunk_size=2, 
+        decode_chunk_size=2,
         num_inference_steps=10,
         callback_on_step_end=video_progress,
     ).frames[0]

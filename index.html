@@ -43,7 +43,7 @@
         flex-direction: column;
         align-items: center;
         height: 100%;
-        width: calc(100% - 725px);
+        width: calc(100% - 525px);
       }
 
       #spinner_container {
@@ -176,7 +176,7 @@
 
       #generated_image {
         object-fit: contain;
-        height: calc(100vh - 475px);
+        height: calc(100vh - 425px);
         width: auto;
         border-radius: 8px;
       }
@@ -501,17 +501,9 @@
         <p>Qwen3</p>
       </div>
 
-      <img
-        id="logo_image"
-        class="logo-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png"
-      />
+      <img id="logo_image" class="logo-image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls.png" />
       <div id="speech_bubble" class="bubble hb">Koita vaikka sanoa notta "tees mulle uus kuva tekoälyagentista"</div>
-      <img
-        id="jr_image"
-        class="jr-image"
-        src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png"
-      />
+      <img id="jr_image" class="jr-image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png" />
       <h1>Voice Guided AI-Powered Imaging</h1>
 
       <div class="controls-content">
@@ -621,17 +613,12 @@
       </div>
 
       <div class="gen-image-container">
-        <img
-          id="generated_image"
-          src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp"
-        />
+        <img id="generated_image" src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/canvas.webp" />
         <div class="gen-image-buttons">
           <button id="chart_button" class="gallery_chart_button">
             <div class="text_image_div">
               <p>CHART</p>
-              <img
-                src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/tree_chart.png"
-              />
+              <img src="https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/tree_chart.png" />
             </div>
             <div class="spacer_div"></div>
           </button>
@@ -1203,13 +1190,9 @@
           };
           const elemWid = tree_view.offsetWidth;
           const elemHei = tree_view.offsetHeight;
-          let initalZoom =
-            screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
+          let initalZoom = screenSize.w / elemWid < screenSize.h / elemHei ? screenSize.w / elemWid : screenSize.h / elemHei;
           panzoom_element.zoomAbs(0, 0, initalZoom * 0.9);
-          panzoom_element.moveTo(
-            (screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3,
-            (screenSize.h - elemHei * initalZoom) / 2
-          );
+          panzoom_element.moveTo((screenSize.w - elemWid * initalZoom) / 2 - screenSize.w * 0.3, (screenSize.h - elemHei * initalZoom) / 2);
           panzoom_parent.style.opacity = 1;
         });
       }
@@ -1263,8 +1246,7 @@
           case 1:
             speechBubbleEnabled = false;
             logo_image.style.display = "none";
-            jr_image.src =
-              "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png";
+            jr_image.src = "https://raw.githubusercontent.com/Koodattu/ucs-llm-voice-image-edit/main/assets/gls_wide.png";
             processJussiRasku("init:gls");
             break;
           case 2:
@@ -1291,24 +1273,20 @@
 
       let timer = null;
       function processJussiRasku(data) {
-        let newText =
-          language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
+        let newText = language === "fi" ? "Nyt en ihan ymmärtänyt, yritä uudestaan!" : "I didn't quite get that, try again!";
         if (data.startsWith("init:")) {
           const guy = data.split(":")[1];
           newText = responses[language].initReplies[guy];
         } else if (data.startsWith("create:")) {
-          newText =
-            responses[language].createReplies[Math.floor(Math.random() * responses[language].createReplies.length)];
+          newText = responses[language].createReplies[Math.floor(Math.random() * responses[language].createReplies.length)];
         } else if (data.startsWith("edit:")) {
           newText = responses[language].editReplies[Math.floor(Math.random() * responses[language].editReplies.length)];
         } else if (data.startsWith("video:")) {
-          newText =
-            responses[language].videoReplies[Math.floor(Math.random() * responses[language].videoReplies.length)];
+          newText = responses[language].videoReplies[Math.floor(Math.random() * responses[language].videoReplies.length)];
         } else if (data.startsWith("undo:")) {
           newText = responses[language].undoReplies[Math.floor(Math.random() * responses[language].undoReplies.length)];
         } else if (data.startsWith("error:")) {
-          newText =
-            responses[language].errorReplies[Math.floor(Math.random() * responses[language].errorReplies.length)];
+          newText = responses[language].errorReplies[Math.floor(Math.random() * responses[language].errorReplies.length)];
         } else if (data.startsWith("done:")) {
           newText = responses[language].doneReplies[Math.floor(Math.random() * responses[language].doneReplies.length)];
         }
@@ -1319,10 +1297,7 @@
 
         function startTimer() {
           timer = setTimeout(() => {
-            newText =
-              responses[language].createOrEditReminderReplies[
-                Math.floor(Math.random() * responses[language].createOrEditReminderReplies.length)
-              ];
+            newText = responses[language].createOrEditReminderReplies[Math.floor(Math.random() * responses[language].createOrEditReminderReplies.length)];
             changeBubbleText(newText);
             startTimer();
           }, 30000);
