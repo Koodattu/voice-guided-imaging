@@ -2,6 +2,8 @@
 
 A web-based AI imaging platform that allows users to create and edit images using voice commands. The system supports both local and cloud-based processing with intelligent session management and queue systems.
 
+![Preview](readme-image/Capture.PNG)
+
 ## Architecture
 
 The system has been completely refactored into a two-server architecture:
